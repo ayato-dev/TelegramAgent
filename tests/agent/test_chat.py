@@ -318,21 +318,28 @@ async def test_content_filter_is_a_refusal() -> None:
     assert result_of(await collect(runner(fake))).refused
 
 
-async def test_groq_built_in_tools_are_reported_and_charts_sent() -> None:
+async def test_groq_built_in_tools_are_reported_counted_and_charts_sent() -> None:
     png = base64.b64encode(b"PNG").decode()
-    search = {"index": 0, "type": "search", "arguments": '{"query": "курс евро"}'}
+    query = '{"query": "курс евро", "topn": 5}'
+    started_search = {"index": 0, "type": "function", "name": "browser.search", "arguments": query}
+    finished_search = {**started_search, "type": "browser_search", "output": "L0: ..."}
+    page = {"index": 1, "type": "function", "name": "browser.open", "arguments": '{"cursor": 0, "id": 2}'}
     python = {
-        "index": 1,
+        "index": 2,
         "type": "python",
+        "name": "python",
         "arguments": '{"code": "plot()"}',
         "code_results": [{"text": "", "png": png}],
     }
     fake = FakeChatClient(
         [
             [
-                chunk(reasoning="ищу", reasoning_field="reasoning", executed=[search]),
-                chunk(executed=[search, python]),
-                chunk(content="95", finish="stop"),
+                chunk(reasoning="ищу", reasoning_field="reasoning", executed=[started_search]),
+                chunk(executed=[finished_search]),
+                chunk(executed=[page]),
+                chunk(executed=[python]),
+                chunk(content="95 ₽【2†L30"),
+                chunk(content="-L34】, по ЦБ", finish="stop"),
             ]
         ]
     )
@@ -340,9 +347,22 @@ async def test_groq_built_in_tools_are_reported_and_charts_sent() -> None:
     events = await collect(runner(fake, spec=OSS))
 
     started = [event for event in events if isinstance(event, ToolStarted)]
-    assert started == [ToolStarted("web_search", "курс евро"), ToolStarted("code_execution", "plot()")]
+    assert started == [
+        ToolStarted("web_search", "курс евро"),
+        ToolStarted("web_fetch", ""),
+        ToolStarted("code_execution", "plot()"),
+    ]
     assert FileProduced("chart.png", "image/png", b"PNG") in events
-    assert result_of(events).nodes == [("assistant", [{"role": "assistant", "content": "95"}])]
+    assert "".join(event.text for event in events if isinstance(event, TextDelta)) == "95 ₽, по ЦБ"
+    result = result_of(events)
+    assert result.nodes == [("assistant", [{"role": "assistant", "content": "95 ₽, по ЦБ"}])]
+    assert result.usage.web_search_requests == 1
+
+
+async def test_deepseek_keeps_corner_brackets() -> None:
+    fake = FakeChatClient([[chunk(content="【注】", finish="stop")]])
+
+    assert result_of(await collect(runner(fake))).text == "【注】"
 
 
 async def test_usage_reads_cache_hits_from_the_last_chunk() -> None:

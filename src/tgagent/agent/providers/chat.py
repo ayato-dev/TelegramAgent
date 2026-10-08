@@ -28,7 +28,13 @@ from tgagent.storage.repos import Content, NodeRecord, Role
 
 log = logging.getLogger(__name__)
 
-BUILT_IN_NAMES = {"search": "web_search", "browser_search": "web_search", "python": "code_execution"}
+# Groq gpt-oss browses in steps: search, then open and find inside pages.
+BUILT_IN_NAMES = {
+    "browser.search": "web_search",
+    "browser.open": "web_fetch",
+    "browser.find": "web_fetch",
+    "python": "code_execution",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +44,26 @@ class ChatProfile:
     efforts: Mapping[Effort, str]
     # Extra request fields for complete(): as little thinking as the provider allows.
     quick: Mapping[str, Any]
+    # gpt-oss marks browsed sources like 【2†L30-L34】, which mean nothing to the reader.
+    strip_citations: bool = False
+
+
+class CitationFilter:
+    """Drops 【…】 source markers from streamed text, even when split across chunks."""
+
+    def __init__(self) -> None:
+        self._inside = False
+
+    def __call__(self, text: str) -> str:
+        kept: list[str] = []
+        for char in text:
+            if self._inside:
+                self._inside = char != "】"
+            elif char == "【":
+                self._inside = True
+            else:
+                kept.append(char)
+        return "".join(kept)
 
 
 PROFILES = {
@@ -52,6 +78,7 @@ PROFILES = {
         keep_reasoning=False,
         efforts={"low": "low", "medium": "medium", "high": "high"},
         quick={"reasoning_effort": "low"},
+        strip_citations=True,
     ),
 }
 
@@ -205,7 +232,8 @@ class ChatRunner:
             text: list[str] = []
             reasoning: list[str] = []
             calls: dict[int, dict[str, str]] = {}
-            executed: dict[int, dict[str, Any]] = {}
+            executed: dict[str, dict[str, Any]] = {}
+            citations = CitationFilter() if self._profile.strip_citations else None
             reported: CompletionUsage | None = None
             started = time.monotonic()
             async with await self._client.chat.completions.create(
@@ -220,9 +248,9 @@ class ChatRunner:
                             reasoning.append(piece)
                             if options.show_thinking:
                                 yield ThinkingDelta(piece)
-                        if delta.content:
-                            text.append(delta.content)
-                            yield TextDelta(delta.content)
+                        if piece := (citations(delta.content or "") if citations else delta.content):
+                            text.append(piece)
+                            yield TextDelta(piece)
                         for fragment in delta.tool_calls or []:
                             entry = calls.setdefault(fragment.index, {"id": "", "name": "", "arguments": ""})
                             entry["id"] = fragment.id or entry["id"]
@@ -230,10 +258,14 @@ class ChatRunner:
                                 entry["name"] = fragment.function.name or entry["name"]
                                 entry["arguments"] += fragment.function.arguments or ""
                         for tool in getattr(delta, "executed_tools", None) or []:
-                            if tool.get("index") not in executed and (event := self._built_in(tool)):
-                                yield event
-                            executed[tool.get("index", len(executed))] = tool
+                            index = str(tool.get("index", len(executed)))
+                            if index not in executed:
+                                yield self._built_in(tool)
+                            executed[index] = tool
             self._add_usage(usage, reported)
+            usage.web_search_requests += sum(
+                tool.get("name") == "browser.search" for tool in executed.values()
+            )
             thinking += reasoning
             log.info(
                 "%s %s: total=%.2fs finish=%s in=%d out=%d",
@@ -298,13 +330,13 @@ class ChatRunner:
         )
 
     @staticmethod
-    def _built_in(tool: dict[str, Any]) -> ToolStarted | None:
-        kind = str(tool.get("type", ""))
+    def _built_in(tool: dict[str, Any]) -> ToolStarted:
+        name = str(tool.get("name") or tool.get("type") or "tool")
         try:
             args = json.loads(tool.get("arguments") or "{}")
         except json.JSONDecodeError:
             args = {}
-        return ToolStarted(BUILT_IN_NAMES.get(kind, kind), summarize_tool(args)) if kind else None
+        return ToolStarted(BUILT_IN_NAMES.get(name, name), summarize_tool(args))
 
     @staticmethod
     def _charts(executed: Any) -> list[FileProduced]:
