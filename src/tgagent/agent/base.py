@@ -34,6 +34,32 @@ class LLMRunner(Protocol):
         ...
 
 
+def as_text_block(block: dict[str, Any]) -> dict[str, Any]:
+    """A client-side compaction summary is replayed as plain text to the model."""
+    if block.get("type") == "compaction":
+        return {
+            "type": "text",
+            "text": f"<conversation_summary>\n{block['content']}\n</conversation_summary>",
+        }
+    return block
+
+
+def plain_text(content: Content) -> str:
+    """Visible text of a stored node in any provider's format; tool traffic and thoughts are skipped."""
+    parts: list[str] = []
+    for block in content:
+        kind = block.get("type")
+        if kind == "text" or (kind is None and "text" in block and not block.get("thought")):
+            parts.append(block["text"])
+        elif kind == "compaction":
+            parts.append(block["content"])
+        elif kind == "message":
+            parts += [part["text"] for part in block["content"] if part.get("type") == "output_text"]
+        elif block.get("role") == "assistant" and isinstance(block.get("content"), str):
+            parts.append(block["content"])
+    return "\n".join(part for part in parts if part)
+
+
 def summarize_tool(payload: Any) -> str:
     """Short status line for a tool call: its query, URL or first line of code."""
     args = payload if isinstance(payload, dict) else {}

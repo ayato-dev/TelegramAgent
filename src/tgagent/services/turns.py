@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import anthropic
 
-from tgagent.agent.base import LLMRunner
+from tgagent.agent.base import LLMRunner, plain_text
 from tgagent.agent.events import FileProduced, TextDelta, TurnResult
 from tgagent.agent.pricing import turn_cost
 from tgagent.agent.registry import ProviderRegistry
@@ -36,6 +36,13 @@ ATTACHMENT_TEXT = (
 )
 ATTACHMENT_ERROR_MARKERS = ("document", "image", "file format", "media type")
 STOPPED_SUFFIX = "\n\n_⏹ Остановлено_"
+SUMMARY_PROMPT = (
+    "Below is a conversation between a user and you, an AI assistant in Telegram. Summarise it so the "
+    "conversation can go on without the full history: keep facts, names, numbers, dates, decisions, the "
+    "user's preferences, open questions and anything you promised to do. Write in the conversation's "
+    "language as short bullet points.\n\n<conversation>\n{transcript}\n</conversation>"
+)
+SUMMARY_MAX_TOKENS = 2_000
 KIND_LABELS = {
     "private": "личный чат",
     "group": "группа",
@@ -123,6 +130,51 @@ class TurnService:
         )
         return created, None, False
 
+    async def _compact(
+        self, request: TurnRequest, conversation: ConversationRecord, parent_id: int | None, runner: LLMRunner
+    ) -> int | None:
+        """Client-side compaction for models without it on the server: once the last prompt outgrew
+        the model's budget, the branch is summarised into a node the next turn continues from."""
+        spec = runner.spec
+        if (
+            spec.compaction != "client"
+            or parent_id is None
+            or conversation.last_prompt_tokens <= spec.context_trigger
+        ):
+            return None
+        path = await self._conversations.path(parent_id)
+        transcript = "\n\n".join(
+            f"{'User' if node.role == 'user' else 'Assistant'}: {text}"
+            for node in path
+            if (text := plain_text(node.content))
+        )
+        try:
+            summary, usage = await runner.complete(
+                SUMMARY_PROMPT.format(transcript=transcript),
+                max_tokens=min(SUMMARY_MAX_TOKENS, spec.max_output),
+            )
+        except Exception:
+            log.warning("could not compact conversation %s", conversation.id, exc_info=True)
+            return None
+        record = UsageRecord(
+            request.user_id,
+            request.chat_id,
+            "compaction",
+            spec.key,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cache_read_tokens=usage.cache_read_tokens,
+        )
+        await self._usage.add(record.with_cost(turn_cost(spec, usage)))
+        if not summary.strip():
+            return None
+        log.info(
+            "compacted conversation %s at %d prompt tokens", conversation.id, conversation.last_prompt_tokens
+        )
+        return await self._conversations.add_node(
+            conversation.id, parent_id, "user", [{"type": "compaction", "content": summary.strip()}]
+        )
+
     def _environment(self, request: TurnRequest) -> str:
         attrs = [f'chat="{KIND_LABELS[request.kind]}"']
         if request.chat_title:
@@ -135,12 +187,14 @@ class TurnService:
         conversation, parent_id, from_reply = await self._resolve(request)
         assert conversation.model is not None
         runner = self._runners.runner(conversation.model)
+        compacted = await self._compact(request, conversation, parent_id, runner)
         turn = TurnInput(
             request.trigger,
             context=() if from_reply else request.reply_context,
             album=request.album,
-            environment=self._environment(request) if parent_id is None else None,
+            environment=self._environment(request) if parent_id is None or compacted else None,
         )
+        parent_id = compacted or parent_id
         content = await runner.encode_user(
             turn, include_author=request.include_author, code_enabled=request.options.code
         )

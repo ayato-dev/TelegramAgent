@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, cast
 from zoneinfo import ZoneInfo
@@ -46,13 +47,20 @@ class ScriptedRunner:
         self.hang = hang
         self.error = error
         self.received: list[list[dict[str, Any]]] = []
+        self.prompts: list[str] = []
+        self.summary: str | Exception = "краткое содержание"
         self._builder = ContentBuilder(cast(MediaService, NoMedia()), ZoneInfo("UTC"))
 
     async def encode_user(self, turn: TurnInput, *, include_author: bool, code_enabled: bool) -> Content:
         return await self._builder.build(turn, include_author=include_author, code_enabled=code_enabled)
 
     async def complete(self, prompt: str, *, max_tokens: int) -> tuple[str, TurnUsage]:
-        raise AssertionError("not used")
+        self.prompts.append(prompt)
+        if isinstance(self.summary, Exception):
+            raise self.summary
+        usage = TurnUsage()
+        usage.add_iteration(100, 20, 0, 0)
+        return self.summary, usage
 
     async def run(
         self,
@@ -392,3 +400,57 @@ async def test_usage_and_prompt_size_are_recorded_per_model(sessions: SessionFac
     async with sessions() as session:
         models = list(await session.scalars(select(UsageEvent.model)))
     assert models == [OSS.key]
+
+
+CLIENT_SIDE = replace(OSS, context_trigger=1_000)
+
+
+async def test_long_client_side_conversation_is_summarised_first(sessions: SessionFactory) -> None:
+    oss = ScriptedRunner(
+        [
+            result(("assistant", [TEXT]), prompt_tokens=5_000),
+            result(("assistant", [TEXT]), prompt_tokens=600),
+        ],
+        spec=CLIENT_SIDE,
+    )
+    turns = service(sessions, oss)
+    await turns.run(private(message(1, "раз")), RecordingSink())
+
+    await turns.run(private(message(2, "два")), RecordingSink())
+
+    assert "раз" in oss.prompts[0] and "ответ" in oss.prompts[0]
+    second = oss.received[1]
+    assert second[0] == {"role": "user", "content": [{"type": "compaction", "content": "краткое содержание"}]}
+    assert [m["role"] for m in second] == ["user", "user"]
+    assert "<environment" in second[1]["content"][0]["text"]
+    active = await ConversationRepo(sessions).active(7, None)
+    assert active is not None and active.last_prompt_tokens == 600
+    async with sessions() as session:
+        kinds = list(await session.scalars(select(UsageEvent.kind).order_by(UsageEvent.id)))
+    assert kinds == ["chat", "compaction", "chat"]
+
+
+async def test_short_conversations_and_server_compaction_are_left_alone(sessions: SessionFactory) -> None:
+    oss = ScriptedRunner([result(("assistant", [TEXT]), prompt_tokens=900)] * 2, spec=CLIENT_SIDE)
+    haiku = ScriptedRunner([result(("assistant", [TEXT]), prompt_tokens=500_000)] * 2)
+
+    for runner, chat in ((oss, 7), (haiku, 8)):
+        turns = service(sessions, runner)
+        for message_id in (1, 2):
+            request = replace(private(message(message_id, "текст", chat_id=chat)), chat_id=chat)
+            await turns.run(request, RecordingSink())
+
+    assert oss.prompts == [] and haiku.prompts == []
+
+
+async def test_failed_summary_keeps_the_full_history(sessions: SessionFactory) -> None:
+    oss = ScriptedRunner(
+        [result(("assistant", [TEXT]), prompt_tokens=5_000), result(("assistant", [TEXT]))], spec=CLIENT_SIDE
+    )
+    oss.summary = RuntimeError("rate limited")
+    turns = service(sessions, oss)
+    await turns.run(private(message(1, "раз")), RecordingSink())
+
+    await turns.run(private(message(2, "два")), RecordingSink())
+
+    assert [m["role"] for m in oss.received[1]] == ["user", "assistant", "user"]

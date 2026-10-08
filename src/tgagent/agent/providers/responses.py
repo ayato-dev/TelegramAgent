@@ -16,7 +16,7 @@ from typing import Any
 from openai import AsyncOpenAI
 from openai.types.responses import Response
 
-from tgagent.agent.base import summarize_tool
+from tgagent.agent.base import as_text_block, summarize_tool
 from tgagent.agent.events import AgentEvent, FileProduced, TextDelta, ThinkingDelta, ToolStarted, TurnResult
 from tgagent.agent.models import ModelSpec
 from tgagent.agent.pricing import TurnUsage
@@ -54,10 +54,8 @@ def function_tools(registry: ToolRegistry) -> list[dict[str, Any]]:
 
 
 def _user_content(content: Content) -> list[dict[str, Any]]:
-    return [
-        {"type": "input_text", "text": block["text"]} if block.get("type") == "text" else block
-        for block in content
-    ]
+    blocks = [as_text_block(block) for block in content]
+    return [{"type": "input_text", "text": b["text"]} if b.get("type") == "text" else b for b in blocks]
 
 
 def _text(content: Content) -> str:

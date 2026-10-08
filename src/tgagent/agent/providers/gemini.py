@@ -15,7 +15,7 @@ from typing import Any
 from google import genai
 from google.genai import types
 
-from tgagent.agent.base import summarize_tool
+from tgagent.agent.base import as_text_block, summarize_tool
 from tgagent.agent.events import AgentEvent, FileProduced, TextDelta, ThinkingDelta, ToolStarted, TurnResult
 from tgagent.agent.models import ModelSpec
 from tgagent.agent.pricing import TurnUsage
@@ -39,7 +39,8 @@ REFUSALS = {
 
 
 def _part(block: dict[str, Any]) -> dict[str, Any]:
-    """Stored blocks are Gemini parts, except provider-neutral text blocks."""
+    """Stored blocks are Gemini parts, except provider-neutral text and summaries."""
+    block = as_text_block(block)
     return {"text": block["text"]} if block.get("type") == "text" else block
 
 
@@ -52,12 +53,19 @@ def _is_tool_output(content: Content) -> bool:
 
 
 def replay(path: Sequence[NodeRecord]) -> list[dict[str, Any]]:
+    """Consecutive turns of one role (a summary and the next message) are merged into one."""
     contents: list[dict[str, Any]] = []
     for node in path:
         if node.role == "user" and not _is_tool_output(node.content):
-            contents.append({"role": "user", "parts": [_part(block) for block in node.content]})
+            role, parts = "user", [_part(block) for block in node.content]
         elif node.role == "assistant" and (text := _visible_text([_part(block) for block in node.content])):
-            contents.append({"role": "model", "parts": [{"text": text}]})
+            role, parts = "model", [{"text": text}]
+        else:
+            continue
+        if contents and contents[-1]["role"] == role:
+            contents[-1]["parts"].extend(parts)
+        else:
+            contents.append({"role": role, "parts": parts})
     return contents
 
 

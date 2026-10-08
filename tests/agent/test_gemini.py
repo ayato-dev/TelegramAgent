@@ -198,8 +198,7 @@ async def test_previous_turns_are_replayed_as_user_parts_and_model_text() -> Non
 
     assert contents(fake) == [
         {"role": "user", "parts": [{"text": "q1"}, voice]},
-        {"role": "model", "parts": [{"text": "a1"}]},
-        {"role": "model", "parts": [{"text": "stopped"}]},
+        {"role": "model", "parts": [{"text": "a1"}, {"text": "stopped"}]},
         {"role": "user", "parts": [{"text": "q2"}]},
     ]
 
@@ -328,3 +327,16 @@ async def test_complete_is_a_cheap_single_request() -> None:
     assert (usage.input_tokens, usage.output_tokens) == (10, 4)
     assert cfg.max_output_tokens == 256
     assert cfg.thinking_config.thinking_level == types.ThinkingLevel.LOW
+
+
+async def test_client_side_summary_is_merged_into_the_first_user_turn() -> None:
+    path = [
+        NodeRecord(1, 1, None, "user", [{"type": "compaction", "content": "итоги"}], True),
+        NodeRecord(2, 1, 1, "user", [{"type": "text", "text": "дальше"}], False),
+    ]
+    fake = FakeGemini([[chunk({"text": "ok"}, finish="STOP")]])
+
+    await collect(runner(fake), path=path)
+
+    summary = "<conversation_summary>\nитоги\n</conversation_summary>"
+    assert contents(fake) == [{"role": "user", "parts": [{"text": summary}, {"text": "дальше"}]}]

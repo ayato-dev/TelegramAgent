@@ -285,3 +285,19 @@ async def test_complete_is_a_cheap_single_request() -> None:
     assert usage.output_tokens == 5
     assert (params["input"], params["max_output_tokens"], params["store"]) == ("назови диалог", 256, False)
     assert params["reasoning"] == {"effort": "low"}
+
+
+async def test_client_side_summary_opens_the_replay() -> None:
+    path = [
+        NodeRecord(1, 1, None, "user", [{"type": "compaction", "content": "итоги"}], True),
+        NodeRecord(2, 1, 1, "user", [{"type": "text", "text": "дальше"}], False),
+    ]
+    fake = FakeOpenAI([([], response([message("ok")]))])
+
+    await collect(runner(fake), path=path)
+
+    summary = "<conversation_summary>\nитоги\n</conversation_summary>"
+    assert fake.responses.calls[0]["input"] == [
+        {"role": "user", "content": [{"type": "input_text", "text": summary}]},
+        {"role": "user", "content": [{"type": "input_text", "text": "дальше"}]},
+    ]
