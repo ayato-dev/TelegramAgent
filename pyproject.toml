@@ -1,0 +1,60 @@
+[project]
+name = "tgagent"
+version = "0.1.0"
+description = "Closed-access Telegram AI agent on Claude Haiku 5.5"
+authors = [
+    { name = "ayato-dev", email = "vi@ayato.dev" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "aiogram==3.31.0",
+    "alembic==1.20.0",
+    "anthropic==1.12.1",
+    "asyncpg==0.32.0",
+    "groq==1.7.0",
+    "pydantic-settings==2.15.0",
+    "sqlalchemy[asyncio]==2.1.4",
+    "telegramify-markdown==1.4.0",
+    "tzdata>=2025.2",
+]
+
+[project.scripts]
+tgagent = "tgagent.app:run"
+
+[build-system]
+requires = ["uv_build>=0.11.20,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy==2.4.0",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "ruff==0.16.10",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "ASYNC", "RUF", "N", "C4", "PIE", "RET"]
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+packages = ["tgagent"]
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["telegramify_markdown.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = ["db: requires a PostgreSQL database (TEST_DATABASE_URL)"]
+addopts = "-q"
