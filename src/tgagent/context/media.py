@@ -1,5 +1,6 @@
 import logging
 import mimetypes
+import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -101,12 +102,16 @@ class MediaService:
             return cached.transcript
         if (media.file_size or 0) > TELEGRAM_DOWNLOAD_LIMIT:
             return "[не удалось расшифровать: файл больше 20 МБ]"
+        started = time.monotonic()
         try:
             data = await self._source.download(media.file_id)
             text = await self._stt.transcribe(data, upload_filename(media)) or "[речь не распознана]"
         except Exception:
             log.warning("transcription failed for %s", media.file_unique_id, exc_info=True)
             return "[не удалось расшифровать]"
+        log.info(
+            "whisper %s: %ss audio in %.2fs", media.file_unique_id, media.duration, time.monotonic() - started
+        )
         await self._cache.save_transcript(media.file_unique_id, text)
         seconds = float(media.duration or 0)
         record = UsageRecord(user_id, chat_id, "stt", self._whisper_model, audio_seconds=seconds)

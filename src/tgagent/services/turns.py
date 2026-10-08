@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -107,6 +108,7 @@ class TurnService:
         return f"<environment {' '.join(attrs)}/>"
 
     async def run(self, request: TurnRequest, sink: ResponseSink) -> None:
+        started = time.monotonic()
         conversation, parent_id, from_reply = await self._resolve(request)
         turn = TurnInput(
             request.trigger,
@@ -127,11 +129,15 @@ class TurnService:
         )
 
         await sink.start()
+        prepared = time.monotonic() - started
+        first_output: float | None = None
         partial: list[str] = []
         files: list[FileProduced] = []
         result: TurnResult | None = None
         try:
             async for event in self._runner.run(messages, request.options, ctx, container_id=container):
+                if first_output is None:
+                    first_output = time.monotonic() - started
                 if isinstance(event, TurnResult):
                     result = event
                 elif isinstance(event, FileProduced):
@@ -149,6 +155,14 @@ class TurnService:
             return
 
         assert result is not None
+        log.info(
+            "turn %s %s: prepare=%.2fs first_output=%.2fs total=%.2fs",
+            request.chat_id,
+            request.kind,
+            prepared,
+            first_output or 0.0,
+            time.monotonic() - started,
+        )
         await self._record_usage(request, result)
         if result.refused or not result.nodes:
             await sink.fail(REFUSAL_TEXT)

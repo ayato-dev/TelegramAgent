@@ -249,3 +249,15 @@ async def test_private_reply_to_unknown_message_adds_context_to_ongoing_chat(
     assert [m["role"] for m in runner.received[1]] == ["user", "assistant", "user"]
     assert "<context>" in last_turn
     assert "пересланная новость" in last_turn
+
+
+async def test_turn_logs_timing_breakdown(sessions: SessionFactory, caplog: pytest.LogCaptureFixture) -> None:
+    runner = ScriptedRunner([result(("assistant", [TEXT]))])
+
+    with caplog.at_level("INFO", logger="tgagent.services.turns"):
+        await service(sessions, runner).run(private(message(1, "привет")), RecordingSink())
+
+    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("turn 7 private"))
+    assert "prepare=" in line
+    assert "first_output=" in line
+    assert "total=" in line

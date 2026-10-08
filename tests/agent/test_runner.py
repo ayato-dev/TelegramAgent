@@ -178,3 +178,15 @@ async def test_thinking_display_follows_setting(show: bool) -> None:
     await collect(runner(fake), AgentOptions(show_thinking=show))
 
     assert fake.messages.calls[0]["thinking"]["display"] == ("summarized" if show else "omitted")
+
+
+async def test_each_api_call_logs_timings(caplog: pytest.LogCaptureFixture) -> None:
+    fake = FakeAnthropic([([text_event("hi")], final([TEXT]))])
+
+    with caplog.at_level("INFO", logger="tgagent.agent.runner"):
+        await collect(runner(fake))
+
+    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("claude msg_1"))
+    assert "first_event=" in line
+    assert "total=" in line
+    assert "stop=end_turn" in line

@@ -1,4 +1,5 @@
 import logging
+import time
 from collections.abc import AsyncIterator
 from pathlib import PurePosixPath
 from typing import Any
@@ -190,14 +191,30 @@ class AgentRunner:
             if texts and pending is None:
                 yield TextDelta("\n\n")
             params = self._params(request, options, container_id, tools_allowed=tools_allowed)
+            started = time.monotonic()
+            first_event: float | None = None
             async with self._client.beta.messages.stream(**params) as stream:
+                headers = time.monotonic() - started
                 async for raw in stream:
+                    if first_event is None:
+                        first_event = time.monotonic() - started
                     event = _map_stream_event(raw)
                     if isinstance(event, ThinkingDelta):
                         thinking.append(event.text)
                     if event is not None:
                         yield event
                 message = await stream.get_final_message()
+            log.info(
+                "claude %s: headers=%.2fs first_event=%.2fs total=%.2fs stop=%s in=%d cache_read=%d out=%d",
+                message.id,
+                headers,
+                first_event or 0.0,
+                time.monotonic() - started,
+                message.stop_reason,
+                message.usage.input_tokens,
+                message.usage.cache_read_input_tokens or 0,
+                message.usage.output_tokens,
+            )
 
             usage.add(message.usage)
             if message.container:

@@ -165,3 +165,12 @@ async def test_sticker_has_no_blocks() -> None:
     part = await Harness().describe(ref("sticker", emoji="😂"))
 
     assert (part.body, part.blocks) == (None, [])
+
+
+async def test_transcription_logs_duration(caplog: Any) -> None:
+    h = Harness()
+
+    with caplog.at_level("INFO", logger="tgagent.context.media"):
+        await h.describe(ref("voice", duration=7))
+
+    assert any(r.getMessage().startswith("whisper u1: 7s audio in") for r in caplog.records)
