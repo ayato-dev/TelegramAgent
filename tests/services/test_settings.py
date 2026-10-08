@@ -24,3 +24,10 @@ def test_toggle_returns_patch() -> None:
     assert toggle(options, "effort:high") == {"effort": "high"}
     assert toggle(options, "effort:bogus") == {}
     assert toggle(options, "unknown") == {}
+
+
+def test_style_saved_and_toggled() -> None:
+    assert options_from({"style": "troll"}, default_effort="medium").style == "troll"
+    assert options_from({"style": "evil"}, default_effort="medium").style == "normal"
+    assert toggle(AgentOptions(), "style") == {"style": "troll"}
+    assert toggle(AgentOptions(style="troll"), "style") == {"style": "normal"}

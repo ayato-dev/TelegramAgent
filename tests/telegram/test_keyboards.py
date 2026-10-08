@@ -60,3 +60,8 @@ async def test_album_collected_into_one_batch() -> None:
     assert sorted(len(b) for b in batches) == [1, 2]
     album = next(b for b in batches if len(b) == 2)
     assert [m.message_id for m in album] == [1, 2]
+
+
+def test_style_button_shows_current_style() -> None:
+    assert buttons(AgentOptions())[f"{SETTINGS_PREFIX}style"][0] == "🙂 Стиль: обычный"
+    assert buttons(AgentOptions(style="troll"))[f"{SETTINGS_PREFIX}style"][0] == "😈 Стиль: дерзкий"

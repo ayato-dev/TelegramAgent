@@ -17,7 +17,7 @@ from tgagent.agent.events import (
     TurnResult,
 )
 from tgagent.agent.pricing import TurnUsage
-from tgagent.agent.prompt import SYSTEM_PROMPT
+from tgagent.agent.prompt import STYLE_PROMPTS, SYSTEM_PROMPT
 from tgagent.agent.tools import AgentOptions, ToolContext, ToolRegistry, server_tool_specs
 from tgagent.storage.repos import Content, Role
 
@@ -26,6 +26,11 @@ log = logging.getLogger(__name__)
 BETAS = ["compact-2026-01-12", "thinking-binding-controls-2026-08-01"]
 MAX_PAUSE_CONTINUATIONS = 5
 TRUNCATED = {"max_tokens", "model_context_window_exceeded", "refusal", "pause_turn"}
+
+
+def system_prompt(options: AgentOptions) -> str:
+    style = STYLE_PROMPTS[options.style]
+    return f"{SYSTEM_PROMPT}\n{style}" if style else SYSTEM_PROMPT
 
 
 def _summarize_tool(name: str, payload: Any) -> str:
@@ -123,7 +128,9 @@ class AgentRunner:
         params: dict[str, Any] = {
             "model": self._model,
             "max_tokens": self._max_tokens,
-            "system": [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+            "system": [
+                {"type": "text", "text": system_prompt(options), "cache_control": {"type": "ephemeral"}}
+            ],
             "messages": messages,
             "tools": [
                 *server_tool_specs(

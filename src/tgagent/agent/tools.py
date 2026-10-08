@@ -12,6 +12,7 @@ WEB_FETCH = "web_fetch_20260209"
 CODE_EXECUTION = "code_execution_20260120"
 
 ChatKind = Literal["private", "group", "guest", "reminder"]
+Style = Literal["normal", "troll"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +21,7 @@ class AgentOptions:
     show_thinking: bool = False
     web: bool = True
     code: bool = True
+    style: Style = "normal"
 
 
 @dataclass(frozen=True, slots=True)

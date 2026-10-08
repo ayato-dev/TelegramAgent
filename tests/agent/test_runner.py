@@ -190,3 +190,17 @@ async def test_each_api_call_logs_timings(caplog: pytest.LogCaptureFixture) -> N
     assert "first_event=" in line
     assert "total=" in line
     assert "stop=end_turn" in line
+
+
+async def test_troll_style_extends_system_prompt() -> None:
+    from tgagent.agent.prompt import STYLE_PROMPTS, SYSTEM_PROMPT
+
+    fake = FakeAnthropic([([], final([TEXT])), ([], final([TEXT]))])
+    agent = runner(fake)
+
+    await collect(agent, AgentOptions(style="troll"))
+    await collect(agent, AgentOptions())
+
+    troll, normal = (call["system"][0]["text"] for call in fake.messages.calls)
+    assert troll == SYSTEM_PROMPT + "\n" + STYLE_PROMPTS["troll"]
+    assert normal == SYSTEM_PROMPT
