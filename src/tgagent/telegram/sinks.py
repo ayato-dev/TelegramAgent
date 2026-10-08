@@ -26,7 +26,6 @@ from tgagent.telegram.render import (
     edit_markdown,
     entity_chunks,
     reply_parameters,
-    retrying,
     send_files,
     send_markdown,
     split_markdown,
@@ -48,7 +47,6 @@ TOOL_LABELS = {
     "create_poll": "📊 Создаю опрос",
     "reply_to_checklist_task": "✅ Отчитываюсь по задаче",
 }
-PLACEHOLDER = "💭 Думаю…"
 
 
 def tool_status(event: ToolStarted) -> str:
@@ -185,10 +183,18 @@ class DraftSink:
 
 
 class EditSink:
-    """Groups: a placeholder reply edited as the answer grows (drafts are private-only)."""
+    """Groups: Telegram has no drafts here, so the native "typing…" status shows while the bot works
+    and the answer message appears with the first real text, then grows by edits."""
 
     def __init__(
-        self, bot: Bot, chat_id: int, thread_id: int | None, reply_to: int | None, *, interval: float = 3.0
+        self,
+        bot: Bot,
+        chat_id: int,
+        thread_id: int | None,
+        reply_to: int | None,
+        *,
+        interval: float = 3.0,
+        typing_interval: float = 4.5,
     ) -> None:
         self._bot = bot
         self._chat_id = chat_id
@@ -197,48 +203,37 @@ class EditSink:
         self._state = StreamState()
         self._message_id: int | None = None
         self._ticker = Ticker(self._flush, interval, None)
+        self._typing = Ticker(self._send_typing, typing_interval, typing_interval)
+
+    async def _send_typing(self) -> None:
+        await self._bot.send_chat_action(
+            chat_id=self._chat_id, action="typing", message_thread_id=self._thread_id
+        )
 
     async def start(self) -> None:
-        """A rich placeholder, so later edits stay rich (tables, formulas); plain text as the fallback."""
-        reply = reply_parameters(self._reply_to)
-        try:
-            message = await retrying(
-                lambda: self._bot.send_rich_message(
-                    chat_id=self._chat_id,
-                    rich_message=InputRichMessage(markdown=PLACEHOLDER),
-                    message_thread_id=self._thread_id,
-                    reply_parameters=reply,
-                )
-            )
-        except TelegramBadRequest as exc:
-            log.info("rich placeholder rejected (%s), using plain text", exc.message)
-            message = await retrying(
-                lambda: self._bot.send_message(
-                    chat_id=self._chat_id,
-                    text=PLACEHOLDER,
-                    message_thread_id=self._thread_id,
-                    reply_parameters=reply,
-                )
-            )
-        self._message_id = message.message_id
+        self._typing.touch()
 
     async def on_event(self, event: AgentEvent) -> None:
-        if self._message_id is not None and self._state.apply(event):
+        if self._state.apply(event) and self._state.answer.strip():
             self._ticker.touch()
 
     async def _flush(self) -> None:
-        assert self._message_id is not None
-        answer, status = self._state.answer, self._state.status
-        if not answer:
-            markdown = status or PLACEHOLDER
+        answer = self._state.answer
+        markdown = answer if len(answer) <= RICH_LIMIT else "…\n\n" + answer[-RICH_LIMIT:]
+        if self._message_id is None:
+            sent = await send_markdown(
+                self._bot, self._chat_id, markdown, thread_id=self._thread_id, reply_to=self._reply_to
+            )
+            self._message_id = sent[0].message_id if sent else None
         else:
-            markdown = answer if len(answer) <= RICH_LIMIT else "…\n\n" + answer[-RICH_LIMIT:]
-            if status:
-                markdown += f"\n\n_{status}_"
-        await edit_markdown(self._bot, self._chat_id, self._message_id, markdown)
+            await edit_markdown(self._bot, self._chat_id, self._message_id, markdown)
+
+    async def _stop(self) -> None:
+        await self._ticker.stop()
+        await self._typing.stop()
 
     async def finish(self, markdown: str, files: Sequence[FileProduced]) -> list[int]:
-        await self._ticker.stop()
+        await self._stop()
         chunks = split_markdown(markdown, RICH_LIMIT) or ["Готово."]
         ids: list[int] = []
         if self._message_id is not None and await edit_markdown(
@@ -261,11 +256,16 @@ class EditSink:
         return ids
 
     async def fail(self, text: str) -> None:
-        await self._ticker.stop()
+        await self._stop()
         if self._message_id is None or not await edit_markdown(
             self._bot, self._chat_id, self._message_id, text
         ):
-            await self._bot.send_message(chat_id=self._chat_id, text=text, message_thread_id=self._thread_id)
+            await self._bot.send_message(
+                chat_id=self._chat_id,
+                text=text,
+                message_thread_id=self._thread_id,
+                reply_parameters=reply_parameters(self._reply_to),
+            )
 
 
 class GuestSink:

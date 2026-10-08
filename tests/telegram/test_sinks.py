@@ -64,19 +64,48 @@ async def test_draft_sink_failure_message() -> None:
     assert bot.last("send_message")["text"] == "Ошибка"
 
 
-async def test_edit_sink_replies_with_placeholder_and_edits_final() -> None:
+async def test_edit_sink_shows_native_typing_instead_of_placeholder() -> None:
+    bot = FakeBot()
+    sink = EditSink(bot.as_bot(), chat_id=-100, thread_id=4, reply_to=55, interval=0.01, typing_interval=0.02)
+
+    await sink.start()
+    await sink.on_event(ToolStarted("web_search", "курс"))
+    await asyncio.sleep(0.05)
+
+    assert bot.last("send_chat_action") == {"chat_id": -100, "action": "typing", "message_thread_id": 4}
+    assert "send_rich_message" not in bot.names()
+    assert "send_message" not in bot.names()
+    await sink.finish("ok", [])
+
+
+async def test_edit_sink_streams_real_text_then_edits_final() -> None:
     bot = FakeBot()
     sink = EditSink(bot.as_bot(), chat_id=-100, thread_id=None, reply_to=55, interval=0.01)
 
     await sink.start()
-    placeholder = bot.last("send_rich_message")
     await sink.on_event(TextDelta("част"))
     await asyncio.sleep(0.05)
+    first = bot.last("send_rich_message")
     ids = await sink.finish("Полный ответ", [])
 
-    assert placeholder["reply_parameters"].message_id == 55
+    assert first["markdown"] == "част"
+    assert first["reply_parameters"].message_id == 55
     assert bot.last("edit_rich")["markdown"] == "Полный ответ"
     assert ids == [bot.last("edit_rich")["message_id"]]
+    assert [name for name in bot.names() if name == "send_rich_message"] == ["send_rich_message"]
+
+
+async def test_edit_sink_without_streamed_text_sends_answer_on_finish() -> None:
+    bot = FakeBot()
+    sink = EditSink(bot.as_bot(), chat_id=-100, thread_id=None, reply_to=55)
+
+    await sink.start()
+    ids = await sink.finish("Ответ", [])
+
+    sent = bot.last("send_rich_message")
+    assert (sent["markdown"], sent["reply_parameters"].message_id) == ("Ответ", 55)
+    assert "edit_rich" not in bot.names()
+    assert len(ids) == 1
 
 
 async def test_edit_sink_overflow_goes_to_follow_up_messages() -> None:
@@ -89,6 +118,16 @@ async def test_edit_sink_overflow_goes_to_follow_up_messages() -> None:
 
     assert len(ids) == 2
     assert bot.last("send_rich_message")["reply_parameters"].message_id == ids[0]
+
+
+async def test_edit_sink_failure_without_message_sends_text() -> None:
+    bot = FakeBot()
+    sink = EditSink(bot.as_bot(), chat_id=-100, thread_id=None, reply_to=55)
+
+    await sink.start()
+    await sink.fail("Ошибка")
+
+    assert bot.last("send_message")["text"] == "Ошибка"
 
 
 async def test_files_sent_as_photo_or_document() -> None:
@@ -134,24 +173,3 @@ async def test_guest_sink_falls_back_to_text_content() -> None:
     content = calls[-1].input_message_content  # type: ignore[attr-defined]
     assert isinstance(content, InputTextMessageContent)
     assert content.message_text == "Ответ"
-
-
-async def test_edit_sink_placeholder_is_a_rich_message() -> None:
-    bot = FakeBot()
-    sink = EditSink(bot.as_bot(), chat_id=-100, thread_id=4, reply_to=55)
-
-    await sink.start()
-
-    placeholder = bot.last("send_rich_message")
-    assert placeholder["markdown"] == "💭 Думаю…"
-    assert placeholder["reply_parameters"].message_id == 55
-    assert placeholder["message_thread_id"] == 4
-
-
-async def test_edit_sink_placeholder_falls_back_to_text() -> None:
-    bot = FakeBot(fail={"send_rich_message"})
-    sink = EditSink(bot.as_bot(), chat_id=-100, thread_id=None, reply_to=55)
-
-    await sink.start()
-
-    assert bot.last("send_message")["text"] == "💭 Думаю…"

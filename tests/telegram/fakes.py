@@ -88,3 +88,7 @@ class FakeBot:
     async def answer_callback_query(self, callback_query_id: str, **kw: Any) -> bool:
         self._record("answer_callback_query", {"callback_query_id": callback_query_id, **kw})
         return True
+
+    async def send_chat_action(self, chat_id: int, action: str, **kw: Any) -> bool:
+        self._record("send_chat_action", {"chat_id": chat_id, "action": action, **kw})
+        return True
