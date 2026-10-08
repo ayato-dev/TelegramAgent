@@ -111,11 +111,11 @@ TEST_DATABASE_URL=postgresql+asyncpg://test:test@localhost:55432/test uv run pyt
 
 ### Настройки GitHub
 
-- Репозиторий должен быть **приватным**: self-hosted runner в публичном репозитории небезопасен.
+- Если репозиторий **публичный**: Settings → Actions → General → «Fork pull request workflows» → «Require approval for all outside collaborators». Иначе чужой PR может изменить workflow и запустить код на вашем runner. Деплой-job сам по себе запускается только на push в `main`.
 - **Settings → Environments → `production`**: ограничьте деплой веткой `main`, по желанию добавьте ревьюеров.
 - **Secrets** окружения: `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY`,
   `POSTGRES_PASSWORD` (только буквы, цифры, `-`, `_`).
-- **Variables**: `ALLOWED_USER_IDS` (через запятую). Необязательные: `ACCESS_DENIED_TEXT`, `TIMEZONE`, `DEFAULT_EFFORT`,
+- **Variables**: `DEPLOY_ENABLED=true` (без неё деплой пропускается), `ALLOWED_USER_IDS` (через запятую). Необязательные: `ACCESS_DENIED_TEXT`, `TIMEZONE`, `DEFAULT_EFFORT`,
   `COMPACTION_TRIGGER_TOKENS`, `WHISPER_MODEL`, `DEPLOY_DIR` (по умолчанию `/opt/tgagent`).
 
 ## Эксплуатация

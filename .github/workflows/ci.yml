@@ -97,7 +97,8 @@ jobs:
   deploy:
     name: Deploy
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Opt-in per repository: forks and repos without a server runner skip deployment.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
     # A runner on the server pulls jobs from GitHub: no SSH, no inbound ports.
     runs-on: [self-hosted, linux, tgagent]
     environment: production
