@@ -33,4 +33,5 @@ USER app
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD ["python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/tgagent-heartbeat') > 120)"]
 
-CMD ["python", "-m", "tgagent"]
+# Single instance: apply migrations, then replace the shell with the bot process.
+CMD ["sh", "-c", "alembic upgrade head && exec python -m tgagent"]

@@ -1,0 +1,165 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint & types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff check --output-format=github src tests migrations
+      - run: uv run ruff format --check src tests migrations
+      - run: uv run mypy
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
+      DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run pytest
+      - name: Migrations match the models
+        run: uv run alembic check
+
+  build:
+    name: Build image
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.name }}@${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+      - id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # A runner on the server pulls jobs from GitHub: no SSH, no inbound ports.
+    runs-on: [self-hosted, linux, tgagent]
+    environment: production
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    env:
+      DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/tgagent' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: compose.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Install compose file
+        run: |
+          install -d -m 750 "$DEPLOY_DIR"
+          install -m 640 compose.yaml "$DEPLOY_DIR/compose.yaml"
+
+      - name: Write environment
+        env:
+          BOT_IMAGE: ${{ needs.build.outputs.image }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          ALLOWED_USER_IDS: ${{ vars.ALLOWED_USER_IDS }}
+          TIMEZONE: ${{ vars.TIMEZONE || 'Europe/Moscow' }}
+          DEFAULT_EFFORT: ${{ vars.DEFAULT_EFFORT || 'medium' }}
+          COMPACTION_TRIGGER_TOKENS: ${{ vars.COMPACTION_TRIGGER_TOKENS || '100000' }}
+          WHISPER_MODEL: ${{ vars.WHISPER_MODEL || 'whisper-large-v3' }}
+        run: |
+          umask 077
+          {
+            for name in BOT_IMAGE TELEGRAM_BOT_TOKEN ANTHROPIC_API_KEY GROQ_API_KEY POSTGRES_PASSWORD \
+                        ALLOWED_USER_IDS TIMEZONE DEFAULT_EFFORT COMPACTION_TRIGGER_TOKENS WHISPER_MODEL; do
+              printf '%s=%s\n' "$name" "${!name}"
+            done
+          } > "$DEPLOY_DIR/.env"
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Roll out
+        working-directory: ${{ env.DEPLOY_DIR }}
+        run: |
+          docker compose pull
+          docker compose up -d --no-build --remove-orphans --wait --wait-timeout 180
+
+      - name: Show status on failure
+        if: failure()
+        working-directory: ${{ env.DEPLOY_DIR }}
+        run: |
+          docker compose ps
+          docker compose logs --tail 100 bot
+
+      - name: Prune old images
+        if: success()
+        run: docker image prune -f --filter "until=168h"

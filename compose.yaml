@@ -1,17 +1,5 @@
 name: tgagent
 
-x-app: &app
-  image: ${BOT_IMAGE:-tgagent:local}
-  env_file:
-    - path: ${ENV_FILE:-.env}
-  environment:
-    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tgagent}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tgagent}
-  logging:
-    driver: json-file
-    options:
-      max-size: 10m
-      max-file: "3"
-
 services:
   postgres:
     image: postgres:18
@@ -29,26 +17,23 @@ services:
       timeout: 5s
       retries: 12
 
-  migrate:
-    <<: *app
-    # Same image as the bot: built (dev) or pulled (prod) by the bot service.
-    pull_policy: never
-    command: ["alembic", "upgrade", "head"]
-    restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
   bot:
-    <<: *app
+    image: ${BOT_IMAGE:-tgagent:local}
     build: .
+    env_file:
+      - path: ${ENV_FILE:-.env}
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tgagent}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tgagent}
     restart: unless-stopped
     stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     depends_on:
       postgres:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
 
 volumes:
   pgdata:
