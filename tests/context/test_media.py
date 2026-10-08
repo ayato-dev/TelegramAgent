@@ -61,7 +61,7 @@ class FakeUsage:
 
 
 class Harness:
-    def __init__(self, *, stt_fails: bool = False) -> None:
+    def __init__(self, *, stt_fails: bool = False, paid: bool = True) -> None:
         self.source = FakeSource()
         self.store = FakeStore()
         self.stt = FakeStt(stt_fails)
@@ -74,6 +74,7 @@ class Harness:
             cast(MediaRepo, self.cache),
             cast(UsageRepo, self.usage),
             whisper_model="whisper-large-v3",
+            whisper_paid=paid,
         )
 
     async def describe(self, media: MediaRef, *, code: bool = True) -> Any:
@@ -174,3 +175,13 @@ async def test_transcription_logs_duration(caplog: Any) -> None:
         await h.describe(ref("voice", duration=7))
 
     assert any(r.getMessage().startswith("whisper u1: 7s audio in") for r in caplog.records)
+
+
+async def test_free_groq_tier_records_audio_but_no_cost() -> None:
+    h = Harness(paid=False)
+
+    await h.describe(ref("voice", duration=30))
+
+    record = h.usage.records[0]
+    assert record.audio_seconds == 30
+    assert record.cost_usd == Decimal(0)

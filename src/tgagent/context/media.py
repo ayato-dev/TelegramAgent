@@ -2,6 +2,7 @@ import logging
 import mimetypes
 import time
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any, Protocol
 
 from tgagent.agent.pricing import whisper_cost
@@ -75,6 +76,7 @@ class MediaService:
         usage: UsageRepo,
         *,
         whisper_model: str,
+        whisper_paid: bool,
     ) -> None:
         self._source = source
         self._store = store
@@ -82,6 +84,7 @@ class MediaService:
         self._cache = cache
         self._usage = usage
         self._whisper_model = whisper_model
+        self._whisper_paid = whisper_paid
 
     async def describe(
         self, media: MediaRef, *, code_enabled: bool, user_id: int | None, chat_id: int
@@ -115,7 +118,8 @@ class MediaService:
         await self._cache.save_transcript(media.file_unique_id, text)
         seconds = float(media.duration or 0)
         record = UsageRecord(user_id, chat_id, "stt", self._whisper_model, audio_seconds=seconds)
-        await self._usage.add(record.with_cost(whisper_cost(seconds, self._whisper_model)))
+        cost = whisper_cost(seconds, self._whisper_model) if self._whisper_paid else Decimal(0)
+        await self._usage.add(record.with_cost(cost))
         return text
 
     async def _document(self, media: MediaRef, code_enabled: bool) -> MediaPart:

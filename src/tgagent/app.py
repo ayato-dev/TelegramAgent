@@ -125,6 +125,7 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
         MediaRepo(sessions),
         usage,
         whisper_model=settings.whisper_model,
+        whisper_paid=settings.groq_paid_tier,
     )
 
     async def fire(item: ReminderRecord) -> None:

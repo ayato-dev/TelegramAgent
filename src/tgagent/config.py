@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     web_search_max_uses: int = Field(5, ge=1, le=20)
 
     whisper_model: str = "whisper-large-v3"
+    # The Groq free tier costs nothing; set true on a paid plan to count Whisper in /usage.
+    groq_paid_tier: bool = False
 
     timezone: str = "Europe/Moscow"
     chat_log_retention_days: int = Field(30, ge=1)
