@@ -53,7 +53,11 @@ class FakeCache:
 
     async def save_transcript(self, file_unique_id: str, transcript: str) -> None:
         old = self.entries.get(file_unique_id, MediaEntry(None, None))
-        self.entries[file_unique_id] = MediaEntry(old.anthropic_file_id, transcript)
+        self.entries[file_unique_id] = MediaEntry(old.anthropic_file_id, transcript, old.openai_file_id)
+
+    async def save_openai_file(self, file_unique_id: str, openai_file_id: str) -> None:
+        old = self.entries.get(file_unique_id, MediaEntry(None, None))
+        self.entries[file_unique_id] = MediaEntry(old.anthropic_file_id, old.transcript, openai_file_id)
 
 
 class FakeUsage:

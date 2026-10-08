@@ -15,6 +15,7 @@ from tgagent.stt.groq import upload_filename
 log = logging.getLogger(__name__)
 
 TELEGRAM_DOWNLOAD_LIMIT = 20 * 1024 * 1024
+TOO_BIG_TEXT = "[файл больше 20 МБ — открыть его не получится]"
 IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 TEXT_TYPES = {
     "application/json",
@@ -74,24 +75,34 @@ class UnreadableFileError(Exception):
     """The file's bytes are not what its name and type claim."""
 
 
-def _is_pdf(mime: str, name: str) -> bool:
+def is_pdf(mime: str, name: str) -> bool:
     lowered = name.lower()
     return mime in PDF_TYPES or lowered.endswith(".pdf") or lowered.endswith(SIGNATURE_SUFFIXES)
 
 
-def _is_text(mime: str, name: str) -> bool:
+def is_text(mime: str, name: str) -> bool:
     suffix = name[name.rfind(".") :].lower() if "." in name else ""
     return mime.startswith("text/") or mime in TEXT_TYPES or suffix in TEXT_EXTENSIONS
 
 
+def document_type(media: MediaRef) -> tuple[str, str]:
+    name = media.file_name or "file"
+    return name, media.mime_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
+
+
+def too_big(media: MediaRef) -> bool:
+    return (media.file_size or 0) > TELEGRAM_DOWNLOAD_LIMIT
+
+
 class MediaService:
-    """Telegram media → Claude inputs: Files API uploads and Whisper transcripts, both cached."""
+    """Telegram media → model inputs: downloads, Whisper transcripts (cached) and, for Claude,
+    Files API uploads (cached). ``store`` and ``stt`` are absent without Anthropic or Groq keys."""
 
     def __init__(
         self,
         source: FileSource,
-        store: FileStore,
-        stt: SpeechToText,
+        store: FileStore | None,
+        stt: SpeechToText | None,
         cache: MediaRepo,
         usage: UsageRepo,
         *,
@@ -119,11 +130,21 @@ class MediaService:
             case _:
                 return MediaPart(None)
 
+    async def fetch(self, media: MediaRef) -> bytes | None:
+        """The file's bytes; None when the download fails."""
+        try:
+            return await self._source.download(media.file_id)
+        except Exception:
+            log.warning("download failed for %s", media.file_unique_id, exc_info=True)
+            return None
+
     async def transcript(self, media: MediaRef, *, user_id: int | None, chat_id: int) -> str:
         cached = await self._cache.get(media.file_unique_id)
         if cached and cached.transcript is not None:
             return cached.transcript
-        if (media.file_size or 0) > TELEGRAM_DOWNLOAD_LIMIT:
+        if self._stt is None:
+            return "[расшифровка голосовых недоступна]"
+        if too_big(media):
             return "[не удалось расшифровать: файл больше 20 МБ]"
         started = time.monotonic()
         try:
@@ -143,13 +164,12 @@ class MediaService:
         return text
 
     async def _document(self, media: MediaRef, code_enabled: bool) -> MediaPart:
-        name = media.file_name or "file"
-        mime = media.mime_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
-        if (media.file_size or 0) > TELEGRAM_DOWNLOAD_LIMIT:
-            return MediaPart("[файл больше 20 МБ — открыть его не получится]")
+        name, mime = document_type(media)
+        if too_big(media):
+            return MediaPart(TOO_BIG_TEXT)
         if mime in IMAGE_TYPES:
             return await self._image(media, name, mime)
-        if _is_pdf(mime, name):
+        if is_pdf(mime, name):
             try:
                 file_id = await self._upload(media, name, "application/pdf", prepare=extract_pdf)
             except UnreadableFileError:
@@ -157,7 +177,7 @@ class MediaService:
             if file_id is None:
                 return MediaPart("[не удалось загрузить файл]")
             return MediaPart(None, [{"type": "document", "source": _file_source(file_id), "title": name}])
-        if _is_text(mime, name):
+        if is_text(mime, name):
             file_id = await self._upload(media, name, "text/plain")
             if file_id is None:
                 return MediaPart("[не удалось загрузить файл]")
@@ -187,10 +207,9 @@ class MediaService:
         cached = await self._cache.get(media.file_unique_id)
         if cached and cached.anthropic_file_id:
             return cached.anthropic_file_id
-        try:
-            data = await self._source.download(media.file_id)
-        except Exception:
-            log.warning("download failed for %s", media.file_unique_id, exc_info=True)
+        assert self._store is not None, "Claude media needs the Anthropic Files API"
+        data = await self.fetch(media)
+        if data is None:
             return None
         if prepare is not None:
             prepared = prepare(data)

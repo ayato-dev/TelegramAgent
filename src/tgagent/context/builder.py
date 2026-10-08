@@ -1,11 +1,11 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 from tgagent.context.formatting import render_message
-from tgagent.context.media import MediaService
-from tgagent.domain import NormalizedMessage
+from tgagent.context.media import MediaPart
+from tgagent.domain import MediaRef, NormalizedMessage
 from tgagent.storage.repos import Content
 
 
@@ -15,6 +15,14 @@ class TurnInput:
     context: Sequence[NormalizedMessage] = ()
     album: Sequence[NormalizedMessage] = ()
     environment: str | None = None
+
+
+class MediaEncoder(Protocol):
+    """Turns one attachment into a text note and/or provider-native content blocks."""
+
+    async def describe(
+        self, media: MediaRef, *, code_enabled: bool, user_id: int | None, chat_id: int
+    ) -> MediaPart: ...
 
 
 class _Blocks:
@@ -34,9 +42,9 @@ class _Blocks:
 
 
 class ContentBuilder:
-    """Renders a trigger message (plus the messages it replies to) into one Claude user turn."""
+    """Renders a trigger message (plus the messages it replies to) into one user turn."""
 
-    def __init__(self, media: MediaService, tz: ZoneInfo) -> None:
+    def __init__(self, media: MediaEncoder, tz: ZoneInfo) -> None:
         self._media = media
         self._tz = tz
 
