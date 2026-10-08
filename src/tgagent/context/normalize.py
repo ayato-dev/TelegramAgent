@@ -6,6 +6,7 @@ from aiogram.types import (
     MessageOriginUser,
 )
 
+from tgagent.context.rich_text import rich_to_text
 from tgagent.domain import Checklist, ChecklistItem, MediaRef, NormalizedMessage
 
 
@@ -118,7 +119,9 @@ def normalize(message: Message) -> NormalizedMessage:
         sender_id=message.from_user.id if message.from_user else None,
         sender_name=_sender_name(message),
         date=message.date,
-        text=message.text or message.caption,
+        text=message.text
+        or message.caption
+        or (rich_to_text(message.rich_message) if message.rich_message else None),
         media=_media(message),
         reply_to_message_id=_reply_to(message),
         checklist=_checklist(message),
