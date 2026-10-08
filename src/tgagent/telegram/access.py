@@ -112,9 +112,13 @@ class AccessMiddleware(BaseMiddleware):
                 )
             return
         message = update.message
-        if message and message.chat.type == "private" and message.from_user:
-            if self._cooled_down(message.from_user.id):
-                await bot.send_message(chat_id=message.chat.id, text=text)
+        if (
+            message
+            and message.chat.type == "private"
+            and message.from_user
+            and self._cooled_down(message.from_user.id)
+        ):
+            await bot.send_message(chat_id=message.chat.id, text=text)
 
     def _allowed(self, update: Update) -> bool:
         policy = self._policy
