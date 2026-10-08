@@ -84,3 +84,14 @@ async def test_media_blocks_follow_their_message() -> None:
     assert content[0]["text"].endswith("[фото]\n</message>")
     assert "[голосовое 0:03]\nрасшифровка" in voice_content[0]["text"]
     assert media.calls == ["photo", "voice"]
+
+
+async def test_album_messages_follow_the_trigger() -> None:
+    build, _ = builder()
+    photo = MediaRef("photo", "f", "u")
+    turn = TurnInput(msg(1, "сравни", photo), album=(msg(2, None, photo),))
+
+    content = await build.build(turn, include_author=False, code_enabled=True)
+
+    assert [block["type"] for block in content] == ["text", "image", "text", "image"]
+    assert content[2]["text"].startswith('<message id="2"')

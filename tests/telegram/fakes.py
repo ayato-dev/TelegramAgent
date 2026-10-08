@@ -80,3 +80,7 @@ class FakeBot:
     async def send_poll(self, chat_id: int, question: str, options: list[Any], **kw: Any) -> Message:
         self._record("send_poll", {"chat_id": chat_id, "question": question, "options": options, **kw})
         return self._message(chat_id)
+
+    async def leave_chat(self, chat_id: int) -> bool:
+        self._record("leave_chat", {"chat_id": chat_id})
+        return True

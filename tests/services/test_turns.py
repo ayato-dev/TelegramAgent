@@ -224,3 +224,28 @@ async def test_refusal_keeps_head_and_reports(sessions: SessionFactory) -> None:
 
     assert sink.failed == ["Не могу помочь с этим запросом."]
     assert (await repo.active(7, None)).head_node_id == head_before  # type: ignore[union-attr]
+
+
+async def test_private_reply_to_unknown_message_adds_context_to_ongoing_chat(
+    sessions: SessionFactory,
+) -> None:
+    runner = ScriptedRunner([result(("assistant", [TEXT])), result(("assistant", [TEXT]))])
+    turns = service(sessions, runner)
+    await turns.run(private(message(1, "привет")), RecordingSink())
+    forwarded = message(40, "пересланная новость")
+    request = TurnRequest(
+        kind="private",
+        chat_id=7,
+        thread_id=None,
+        chat_title=None,
+        user_id=1,
+        trigger=message(41, "это правда?", reply_to=40),
+        reply_context=(forwarded,),
+    )
+
+    await turns.run(request, RecordingSink())
+
+    last_turn = runner.received[1][-1]["content"][0]["text"]
+    assert [m["role"] for m in runner.received[1]] == ["user", "assistant", "user"]
+    assert "<context>" in last_turn
+    assert "пересланная новость" in last_turn

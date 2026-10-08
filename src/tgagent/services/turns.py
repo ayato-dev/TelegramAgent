@@ -48,6 +48,7 @@ class TurnRequest:
     user_id: int
     trigger: NormalizedMessage
     reply_context: Sequence[NormalizedMessage] = ()
+    album: Sequence[NormalizedMessage] = ()
     options: AgentOptions = field(default_factory=AgentOptions)
     title_pending: bool = False
 
@@ -81,21 +82,22 @@ class TurnService:
         self._on_title = on_title
         self._background: set[asyncio.Task[None]] = set()
 
-    async def _resolve(self, request: TurnRequest) -> tuple[ConversationRecord, int | None]:
+    async def _resolve(self, request: TurnRequest) -> tuple[ConversationRecord, int | None, bool]:
+        """Where the turn attaches: (conversation, parent node, whether a reply picked the branch)."""
         reply_to = request.trigger.reply_to_message_id
         if reply_to is not None:
             node = await self._conversations.node_for_message(request.chat_id, reply_to)
             if node is not None and (conversation := await self._conversations.get(node.conversation_id)):
-                return conversation, node.id
+                return conversation, node.id, True
         if request.kind == "private":
             active = await self._conversations.active(request.chat_id, request.thread_id)
             if active is not None:
-                return active, active.head_node_id
+                return active, active.head_node_id, False
             created = await self._conversations.create(
                 request.chat_id, request.thread_id, "private", title_pending=request.title_pending
             )
-            return created, None
-        return await self._conversations.create(request.chat_id, request.thread_id, request.kind), None
+            return created, None, False
+        return await self._conversations.create(request.chat_id, request.thread_id, request.kind), None, False
 
     def _environment(self, request: TurnRequest) -> str:
         attrs = [f'chat="{KIND_LABELS[request.kind]}"']
@@ -105,12 +107,12 @@ class TurnService:
         return f"<environment {' '.join(attrs)}/>"
 
     async def run(self, request: TurnRequest, sink: ResponseSink) -> None:
-        conversation, parent_id = await self._resolve(request)
-        is_new = parent_id is None
+        conversation, parent_id, from_reply = await self._resolve(request)
         turn = TurnInput(
             request.trigger,
-            context=request.reply_context if is_new else (),
-            environment=self._environment(request) if is_new else None,
+            context=() if from_reply else request.reply_context,
+            album=request.album,
+            environment=self._environment(request) if parent_id is None else None,
         )
         content = await self._builder.build(
             turn, include_author=request.include_author, code_enabled=request.options.code

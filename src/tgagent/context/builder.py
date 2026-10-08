@@ -13,6 +13,7 @@ from tgagent.storage.repos import Content
 class TurnInput:
     message: NormalizedMessage
     context: Sequence[NormalizedMessage] = ()
+    album: Sequence[NormalizedMessage] = ()
     environment: str | None = None
 
 
@@ -48,7 +49,8 @@ class ContentBuilder:
             for message in turn.context:
                 await self._add(blocks, message, include_author=True, code_enabled=code_enabled)
             blocks.text("</context>")
-        await self._add(blocks, turn.message, include_author=include_author, code_enabled=code_enabled)
+        for message in (turn.message, *turn.album):
+            await self._add(blocks, message, include_author=include_author, code_enabled=code_enabled)
         return blocks.items
 
     async def _add(
