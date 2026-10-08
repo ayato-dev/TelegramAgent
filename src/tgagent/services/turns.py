@@ -7,9 +7,8 @@ from datetime import UTC, datetime
 from html import escape
 from zoneinfo import ZoneInfo
 
-import anthropic
-
 from tgagent.agent.base import LLMRunner, plain_text
+from tgagent.agent.errors import ProviderError, classify
 from tgagent.agent.events import FileProduced, TextDelta, TurnResult
 from tgagent.agent.pricing import turn_cost
 from tgagent.agent.registry import ProviderRegistry
@@ -34,7 +33,19 @@ REFUSAL_TEXT = "Не могу помочь с этим запросом."
 ATTACHMENT_TEXT = (
     "⚠️ Не смог прочитать вложение: такой формат файла модель не принимает. Пришлите PDF, текст или картинку."
 )
-ATTACHMENT_ERROR_MARKERS = ("document", "image", "file format", "media type")
+ERROR_TEXTS = {
+    "rate_limited": "⏳ Модель сейчас упёрлась в лимит запросов (на бесплатных тарифах он маленький). "
+    "Попробуйте через минуту.",
+    "quota": "💳 У провайдера модели закончились деньги или квота. Пополните баланс или выберите "
+    "другую модель в /settings.",
+    "region": "🌍 Провайдер этой модели не работает в регионе сервера бота. "
+    "Выберите другую модель в /settings.",
+    "auth": "🔑 Провайдер не принял API-ключ. Владельцу бота стоит проверить ключи в .env.",
+    "too_long": "📚 Разговор стал слишком длинным для этой модели. Начните новый: /new.",
+    "bad_attachment": ATTACHMENT_TEXT,
+    "unavailable": "⚠️ Сервис модели сейчас недоступен или перегружен. Попробуйте ещё раз чуть позже.",
+    "other": FAILURE_TEXT,
+}
 STOPPED_SUFFIX = "\n\n_⏹ Остановлено_"
 SUMMARY_PROMPT = (
     "Below is a conversation between a user and you, an AI assistant in Telegram. Summarise it so the "
@@ -49,6 +60,14 @@ KIND_LABELS = {
     "guest": "чужой чат (гостевой вызов)",
     "reminder": "личный чат",
 }
+
+
+def error_text(error: ProviderError) -> str:
+    text = ERROR_TEXTS[error.kind]
+    if error.kind == "rate_limited" and error.retry_after:
+        text = text.replace("через минуту", f"через {max(1, round(error.retry_after))} с")
+    return text
+
 
 type TitleCallback = Callable[[ConversationRecord, str, str], Coroutine[None, None, None]]
 
@@ -228,14 +247,10 @@ class TurnService:
         except asyncio.CancelledError:
             await self._stopped(request, conversation, user_node, "".join(partial).strip(), files, sink)
             raise
-        except anthropic.BadRequestError as exc:
-            log.exception("API rejected the turn in chat %s", request.chat_id)
-            attachment = any(marker in str(exc).lower() for marker in ATTACHMENT_ERROR_MARKERS)
-            await sink.fail(ATTACHMENT_TEXT if attachment else FAILURE_TEXT)
-            return
-        except Exception:
-            log.exception("agent turn failed in chat %s", request.chat_id)
-            await sink.fail(FAILURE_TEXT)
+        except Exception as exc:
+            error = classify(exc)
+            log.exception("agent turn failed in chat %s (%s)", request.chat_id, error.kind)
+            await sink.fail(error_text(error))
             return
 
         assert result is not None

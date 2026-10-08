@@ -454,3 +454,21 @@ async def test_failed_summary_keeps_the_full_history(sessions: SessionFactory) -
     await turns.run(private(message(2, "два")), RecordingSink())
 
     assert [m["role"] for m in oss.received[1]] == ["user", "assistant", "user"]
+
+
+async def test_rate_limit_tells_when_to_retry(sessions: SessionFactory) -> None:
+    import httpx2
+    import openai
+
+    response = httpx2.Response(
+        429, request=httpx2.Request("POST", "https://api.groq.com"), headers={"retry-after": "20"}
+    )
+    error = openai.RateLimitError("Rate limit reached for tokens per minute", response=response, body=None)
+    sink = RecordingSink()
+
+    await service(sessions, ScriptedRunner([], spec=OSS, error=error)).run(
+        private(message(1, "привет")), sink
+    )
+
+    assert len(sink.failed) == 1
+    assert "20 с" in sink.failed[0]
