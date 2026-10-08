@@ -13,7 +13,7 @@ from tgagent.agent.tools import AgentOptions, ToolContext
 from tgagent.context.builder import ContentBuilder
 from tgagent.context.media import MediaService
 from tgagent.domain import NormalizedMessage
-from tgagent.services.turns import TurnRequest, TurnService
+from tgagent.services.turns import ATTACHMENT_TEXT, TurnRequest, TurnService
 from tgagent.storage.db import SessionFactory
 from tgagent.storage.repos import ChatLogRepo, ConversationRepo, UsageRepo
 
@@ -25,9 +25,12 @@ TEXT = {"type": "text", "text": "ответ"}
 class ScriptedRunner:
     model = "claude-haiku-5-5"
 
-    def __init__(self, results: list[TurnResult], *, hang: bool = False) -> None:
+    def __init__(
+        self, results: list[TurnResult], *, hang: bool = False, error: Exception | None = None
+    ) -> None:
         self.results = results
         self.hang = hang
+        self.error = error
         self.received: list[list[dict[str, Any]]] = []
 
     async def run(
@@ -39,6 +42,8 @@ class ScriptedRunner:
         container_id: str | None = None,
     ) -> AsyncIterator[AgentEvent]:
         self.received.append(messages)
+        if self.error is not None:
+            raise self.error
         yield TextDelta("част")
         if self.hang:
             await asyncio.Event().wait()
@@ -261,3 +266,20 @@ async def test_turn_logs_timing_breakdown(sessions: SessionFactory, caplog: pyte
     assert "prepare=" in line
     assert "first_output=" in line
     assert "total=" in line
+
+
+async def test_rejected_attachment_gets_a_clear_message(sessions: SessionFactory) -> None:
+    import anthropic
+    import httpx2
+
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    error = anthropic.BadRequestError(
+        "Unsupported document file format: application/pkcs7-signature",
+        response=httpx2.Response(400, request=request),
+        body=None,
+    )
+    sink = RecordingSink()
+
+    await service(sessions, ScriptedRunner([], error=error)).run(private(message(1, "что в файле?")), sink)
+
+    assert sink.failed == [ATTACHMENT_TEXT]

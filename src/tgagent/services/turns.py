@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from html import escape
 from zoneinfo import ZoneInfo
 
+import anthropic
+
 from tgagent.agent.events import FileProduced, TextDelta, TurnResult
 from tgagent.agent.pricing import claude_cost
 from tgagent.agent.runner import AgentRunner
@@ -29,6 +31,10 @@ log = logging.getLogger(__name__)
 
 FAILURE_TEXT = "⚠️ Не удалось получить ответ. Попробуйте ещё раз чуть позже."
 REFUSAL_TEXT = "Не могу помочь с этим запросом."
+ATTACHMENT_TEXT = (
+    "⚠️ Не смог прочитать вложение: такой формат файла модель не принимает. Пришлите PDF, текст или картинку."
+)
+ATTACHMENT_ERROR_MARKERS = ("document", "image", "file format", "media type")
 STOPPED_SUFFIX = "\n\n_⏹ Остановлено_"
 KIND_LABELS = {
     "private": "личный чат",
@@ -149,6 +155,11 @@ class TurnService:
         except asyncio.CancelledError:
             await self._stopped(request, conversation, user_node, "".join(partial).strip(), files, sink)
             raise
+        except anthropic.BadRequestError as exc:
+            log.exception("API rejected the turn in chat %s", request.chat_id)
+            attachment = any(marker in str(exc).lower() for marker in ATTACHMENT_ERROR_MARKERS)
+            await sink.fail(ATTACHMENT_TEXT if attachment else FAILURE_TEXT)
+            return
         except Exception:
             log.exception("agent turn failed in chat %s", request.chat_id)
             await sink.fail(FAILURE_TEXT)

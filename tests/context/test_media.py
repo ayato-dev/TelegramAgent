@@ -1,6 +1,7 @@
 from decimal import Decimal
 from typing import Any, cast
 
+from tests.context.test_pdf import PDF, signed
 from tgagent.context.media import MediaService
 from tgagent.domain import MediaRef
 from tgagent.storage.repos import MediaEntry, MediaRepo, UsageRecord, UsageRepo
@@ -9,18 +10,21 @@ from tgagent.storage.repos import MediaEntry, MediaRepo, UsageRecord, UsageRepo
 class FakeSource:
     def __init__(self) -> None:
         self.downloads: list[str] = []
+        self.contents: dict[str, bytes] = {}
 
     async def download(self, file_id: str) -> bytes:
         self.downloads.append(file_id)
-        return f"bytes:{file_id}".encode()
+        return self.contents.get(file_id, f"bytes:{file_id}".encode())
 
 
 class FakeStore:
     def __init__(self) -> None:
         self.uploads: list[tuple[str, str]] = []
+        self.data: list[bytes] = []
 
     async def upload(self, filename: str, data: bytes, mime_type: str) -> str:
         self.uploads.append((filename, mime_type))
+        self.data.append(data)
         return f"file_{len(self.uploads)}"
 
 
@@ -133,6 +137,7 @@ async def test_transcription_failure_is_reported_in_body() -> None:
 
 async def test_pdf_document() -> None:
     h = Harness()
+    h.source.contents["id-u1"] = PDF
 
     part = await h.describe(ref("document", file_name="r.pdf", mime_type="application/pdf"))
 
@@ -185,3 +190,34 @@ async def test_free_groq_tier_records_audio_but_no_cost() -> None:
     record = h.usage.records[0]
     assert record.audio_seconds == 30
     assert record.cost_usd == Decimal(0)
+
+
+async def test_signed_pdf_is_unwrapped_before_upload() -> None:
+    h = Harness()
+    h.source.contents["id-u1"] = signed(PDF)
+
+    part = await h.describe(ref("document", file_name="diploma.pdf", mime_type="application/pdf"))
+
+    assert part.blocks[0]["type"] == "document"
+    assert h.store.data == [PDF]
+
+
+async def test_detached_signature_file_with_pdf_inside_is_read() -> None:
+    h = Harness()
+    h.source.contents["id-u1"] = signed(PDF)
+
+    part = await h.describe(ref("document", file_name="doc.pdf.sig", mime_type="application/pkcs7-signature"))
+
+    assert part.blocks[0]["type"] == "document"
+    assert h.store.uploads == [("doc.pdf.sig", "application/pdf")]
+
+
+async def test_pdf_without_pdf_inside_becomes_a_note() -> None:
+    h = Harness()
+    h.source.contents["id-u1"] = b"\x00garbage"
+
+    part = await h.describe(ref("document", file_name="broken.pdf", mime_type="application/pdf"))
+
+    assert part.blocks == []
+    assert part.body == "[не удалось прочитать файл: внутри не PDF]"
+    assert h.store.uploads == []
