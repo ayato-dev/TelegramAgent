@@ -66,3 +66,11 @@ def test_web_searches_billed_per_request() -> None:
 def test_whisper_bills_at_least_ten_seconds() -> None:
     assert whisper_cost(3) == whisper_cost(10)
     assert whisper_cost(3600) == Decimal("0.111")
+
+
+def test_sonnet_and_opus_prices() -> None:
+    turn = TurnUsage()
+    turn.add(usage(input_tokens=1_000_000, output_tokens=1_000_000, cache_read_input_tokens=1_000_000))
+
+    assert claude_cost("claude-sonnet-5-5", turn) == Decimal("12.20")
+    assert claude_cost("claude-opus-5-5", turn) == Decimal("24.20")

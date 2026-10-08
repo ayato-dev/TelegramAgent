@@ -33,7 +33,14 @@ HAIKU_5_5 = ModelPricing(
     long=RateCard(Decimal("0.50"), Decimal("2.50"), Decimal("0.625"), Decimal("0.05")),
     long_prompt_threshold=100_000,
 )
-PRICING = {"claude-haiku-5-5": HAIKU_5_5}
+# Sonnet and Opus 5.5 price the full 1M context the same; cache reads are $0.20 on both.
+SONNET_5_5_CARD = RateCard(Decimal("2"), Decimal("10"), Decimal("2.50"), Decimal("0.20"))
+OPUS_5_5_CARD = RateCard(Decimal("4"), Decimal("20"), Decimal("5"), Decimal("0.20"))
+PRICING = {
+    "claude-haiku-5-5": HAIKU_5_5,
+    "claude-sonnet-5-5": ModelPricing(SONNET_5_5_CARD, SONNET_5_5_CARD, long_prompt_threshold=1_000_000),
+    "claude-opus-5-5": ModelPricing(OPUS_5_5_CARD, OPUS_5_5_CARD, long_prompt_threshold=1_000_000),
+}
 WEB_SEARCH_PRICE = Decimal("0.01")
 WHISPER_PRICE_PER_HOUR = {"whisper-large-v3": Decimal("0.111"), "whisper-large-v3-turbo": Decimal("0.04")}
 WHISPER_MIN_BILLED_SECONDS = 10
