@@ -7,7 +7,7 @@ from tgagent.telegram.handlers import commands, groups, guest, membership, priva
 
 PRIVATE_COMMANDS = [
     BotCommand(command="new", description="Новый разговор"),
-    BotCommand(command="settings", description="Глубина размышлений и инструменты"),
+    BotCommand(command="settings", description="Модель, глубина размышлений и инструменты"),
     BotCommand(command="usage", description="Расходы на API"),
     BotCommand(command="help", description="Что я умею"),
 ]
