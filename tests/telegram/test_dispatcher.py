@@ -9,7 +9,12 @@ from tgagent.telegram.dispatcher import GROUP_COMMANDS, build_dispatcher
 
 
 def test_dispatcher_subscribes_to_agent_update_types() -> None:
-    deps = cast(Deps, SimpleNamespace(policy=AccessPolicy(frozenset(), set())))
+    deps = cast(
+        Deps,
+        SimpleNamespace(
+            policy=AccessPolicy(frozenset(), set()), settings=SimpleNamespace(access_denied_text="")
+        ),
+    )
 
     dispatcher = build_dispatcher(deps, cast(Bot, SimpleNamespace()))
 

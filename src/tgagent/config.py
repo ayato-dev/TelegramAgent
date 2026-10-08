@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     database_url: str
 
     allowed_user_ids: Annotated[frozenset[int], NoDecode] = frozenset()
+    # Reply to people outside the whitelist; empty keeps the bot silent.
+    access_denied_text: str = "Доступ к боту закрыт."
 
     anthropic_model: str = "claude-haiku-5-5"
     compaction_trigger_tokens: int = Field(100_000, ge=50_000)

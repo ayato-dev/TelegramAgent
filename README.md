@@ -23,7 +23,8 @@ ephemeral-сообщения.
 - **`/settings`** — глубина размышлений, показ размышлений, веб-поиск, код (в группах — ephemeral-меню).
   **`/usage`** — расходы в $ по периодам и людям.
 - **Доступ.** Только Telegram ID из `ALLOWED_USER_IDS`. Группа разрешена, только если бота добавил
-  человек из списка, иначе бот сразу выходит. Посторонним бот не отвечает.
+  человек из списка, иначе бот сразу выходит. Посторонним бот отвечает текстом `ACCESS_DENIED_TEXT`
+  (не чаще раза в 10 секунд на человека; пустое значение — молчание).
 
 ## Архитектура
 
@@ -114,7 +115,7 @@ TEST_DATABASE_URL=postgresql+asyncpg://test:test@localhost:55432/test uv run pyt
 - **Settings → Environments → `production`**: ограничьте деплой веткой `main`, по желанию добавьте ревьюеров.
 - **Secrets** окружения: `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY`,
   `POSTGRES_PASSWORD` (только буквы, цифры, `-`, `_`).
-- **Variables**: `ALLOWED_USER_IDS` (через запятую). Необязательные: `TIMEZONE`, `DEFAULT_EFFORT`,
+- **Variables**: `ALLOWED_USER_IDS` (через запятую). Необязательные: `ACCESS_DENIED_TEXT`, `TIMEZONE`, `DEFAULT_EFFORT`,
   `COMPACTION_TRIGGER_TOKENS`, `WHISPER_MODEL`, `DEPLOY_DIR` (по умолчанию `/opt/tgagent`).
 
 ## Эксплуатация

@@ -21,7 +21,11 @@ GROUP_COMMANDS = [
 def build_dispatcher(deps: Deps, bot: Bot) -> Dispatcher:
     dispatcher = Dispatcher()
     dispatcher.update.outer_middleware(
-        AccessMiddleware(deps.policy, lambda chat_id: bot.leave_chat(chat_id=chat_id))
+        AccessMiddleware(
+            deps.policy,
+            lambda chat_id: bot.leave_chat(chat_id=chat_id),
+            denied_text=deps.settings.access_denied_text,
+        )
     )
     dispatcher.include_routers(
         membership.router,
