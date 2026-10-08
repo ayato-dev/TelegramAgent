@@ -27,14 +27,20 @@ async def _reset_schema(url: str) -> None:
 
 
 @pytest.fixture(scope="session")
-def migrated_url() -> str:
+def alembic_config() -> Config:
     if not TEST_DATABASE_URL:
         pytest.skip("TEST_DATABASE_URL is not set")
-    asyncio.run(_reset_schema(TEST_DATABASE_URL))
     config = Config(str(ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(ROOT / "migrations"))
     config.set_main_option("sqlalchemy.url", TEST_DATABASE_URL)
-    command.upgrade(config, "head")
+    return config
+
+
+@pytest.fixture(scope="session")
+def migrated_url(alembic_config: Config) -> str:
+    assert TEST_DATABASE_URL
+    asyncio.run(_reset_schema(TEST_DATABASE_URL))
+    command.upgrade(alembic_config, "head")
     return TEST_DATABASE_URL
 
 

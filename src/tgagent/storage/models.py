@@ -100,6 +100,10 @@ class Conversation(Base):
     title_pending: Mapped[bool] = mapped_column(Boolean, server_default=sql("false"))
     container_id: Mapped[str | None] = mapped_column(String(128))
     container_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # provider:model-id the history is written for; None until the first turn picks one.
+    model: Mapped[str | None] = mapped_column(String(96))
+    # Prompt size of the latest request, used to decide on client-side compaction.
+    last_prompt_tokens: Mapped[int] = mapped_column(Integer, server_default=sql("0"))
     created_at: Mapped[datetime] = created_at()
 
 
@@ -130,6 +134,7 @@ class MediaCache(Base):
 
     file_unique_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     anthropic_file_id: Mapped[str | None] = mapped_column(String(128))
+    openai_file_id: Mapped[str | None] = mapped_column(String(128))
     transcript: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at()
 

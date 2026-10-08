@@ -111,6 +111,21 @@ async def test_active_conversation_lifecycle(sessions: SessionFactory) -> None:
     assert active.head_node_id == 10
 
 
+async def test_conversation_model_pinning_and_prompt_size(sessions: SessionFactory) -> None:
+    repo = ConversationRepo(sessions)
+    unpinned = await repo.create(chat_id=1, thread_id=None, kind="private")
+    pinned = await repo.create(chat_id=2, thread_id=None, kind="private", model="groq:openai/gpt-oss-120b")
+
+    await repo.set_model(unpinned.id, "gemini:gemini-3.1-flash-lite")
+    await repo.set_prompt_tokens(pinned.id, 4321)
+
+    assert (unpinned.model, unpinned.last_prompt_tokens) == (None, 0)
+    first, second = await repo.get(unpinned.id), await repo.get(pinned.id)
+    assert first is not None and second is not None
+    assert first.model == "gemini:gemini-3.1-flash-lite"
+    assert (second.model, second.last_prompt_tokens) == ("groq:openai/gpt-oss-120b", 4321)
+
+
 async def test_chat_log_chain_walks_reply_ancestors(sessions: SessionFactory) -> None:
     repo = ChatLogRepo(sessions)
     await repo.add(log_message(1))
@@ -194,6 +209,17 @@ async def test_media_cache_roundtrip(sessions: SessionFactory) -> None:
     entry = await repo.get("U1")
     assert entry is not None
     assert (entry.anthropic_file_id, entry.transcript) == ("file_abc", "привет")
+
+
+async def test_media_cache_keeps_openai_file_ids(sessions: SessionFactory) -> None:
+    repo = MediaRepo(sessions)
+
+    await repo.save_file("U1", "file_abc")
+    await repo.save_openai_file("U1", "file-oa1")
+
+    entry = await repo.get("U1")
+    assert entry is not None
+    assert (entry.anthropic_file_id, entry.openai_file_id) == ("file_abc", "file-oa1")
 
 
 async def test_claim_due_returns_only_due_pending_once(sessions: SessionFactory) -> None:

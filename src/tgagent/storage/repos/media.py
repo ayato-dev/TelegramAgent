@@ -10,10 +10,11 @@ from tgagent.storage.models import MediaCache
 class MediaEntry:
     anthropic_file_id: str | None
     transcript: str | None
+    openai_file_id: str | None = None
 
 
 class MediaRepo:
-    """Caches per-Telegram-file artefacts: Files API ids and voice transcripts."""
+    """Caches per-Telegram-file artefacts: provider file ids and voice transcripts."""
 
     def __init__(self, sessions: SessionFactory) -> None:
         self._sessions = sessions
@@ -21,10 +22,13 @@ class MediaRepo:
     async def get(self, file_unique_id: str) -> MediaEntry | None:
         async with self._sessions() as session:
             row = await session.get(MediaCache, file_unique_id)
-        return MediaEntry(row.anthropic_file_id, row.transcript) if row else None
+        return MediaEntry(row.anthropic_file_id, row.transcript, row.openai_file_id) if row else None
 
     async def save_file(self, file_unique_id: str, anthropic_file_id: str) -> None:
         await self._upsert(file_unique_id, anthropic_file_id=anthropic_file_id)
+
+    async def save_openai_file(self, file_unique_id: str, openai_file_id: str) -> None:
+        await self._upsert(file_unique_id, openai_file_id=openai_file_id)
 
     async def save_transcript(self, file_unique_id: str, transcript: str) -> None:
         await self._upsert(file_unique_id, transcript=transcript)

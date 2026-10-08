@@ -34,6 +34,8 @@ class ConversationRecord:
     title_pending: bool
     container_id: str | None
     container_expires_at: datetime | None
+    model: str | None = None
+    last_prompt_tokens: int = 0
 
 
 def _conversation(row: Conversation) -> ConversationRecord:
@@ -46,6 +48,8 @@ def _conversation(row: Conversation) -> ConversationRecord:
         title_pending=row.title_pending,
         container_id=row.container_id,
         container_expires_at=row.container_expires_at,
+        model=row.model,
+        last_prompt_tokens=row.last_prompt_tokens,
     )
 
 
@@ -60,9 +64,17 @@ class ConversationRepo:
         self._sessions = sessions
 
     async def create(
-        self, chat_id: int, thread_id: int | None, kind: ConversationKind, *, title_pending: bool = False
+        self,
+        chat_id: int,
+        thread_id: int | None,
+        kind: ConversationKind,
+        *,
+        title_pending: bool = False,
+        model: str | None = None,
     ) -> ConversationRecord:
-        row = Conversation(chat_id=chat_id, thread_id=thread_id, kind=kind, title_pending=title_pending)
+        row = Conversation(
+            chat_id=chat_id, thread_id=thread_id, kind=kind, title_pending=title_pending, model=model
+        )
         async with self._sessions.begin() as session:
             session.add(row)
             await session.flush()
@@ -106,6 +118,12 @@ class ConversationRepo:
         self, conversation_id: int, container_id: str, expires_at: datetime | None
     ) -> None:
         await self._update(conversation_id, container_id=container_id, container_expires_at=expires_at)
+
+    async def set_model(self, conversation_id: int, model: str) -> None:
+        await self._update(conversation_id, model=model)
+
+    async def set_prompt_tokens(self, conversation_id: int, tokens: int) -> None:
+        await self._update(conversation_id, last_prompt_tokens=tokens)
 
     async def clear_title_pending(self, conversation_id: int) -> None:
         await self._update(conversation_id, title_pending=False)
