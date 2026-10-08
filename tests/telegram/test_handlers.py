@@ -130,3 +130,21 @@ async def test_task_reminder_runs_agent_turn() -> None:
     assert request.chat_id == 7
     assert "проверь курс евро" in (request.trigger.text or "")
     assert isinstance(sink, PlainSink)
+
+
+def group_command(user: User) -> Any:
+    from aiogram.types import Message
+
+    return Message(message_id=1, date=NOW, chat=GROUP, from_user=user, text="/usage")
+
+
+def test_only_allowed_users_manage_bot_in_groups() -> None:
+    from tgagent.telegram.handlers.commands import can_manage
+
+    policy = AccessPolicy(frozenset({1}), {-50})
+    managed = deps(FakeChats(), policy)
+    private = group_command(STRANGER).model_copy(update={"chat": Chat(id=2, type="private")})
+
+    assert can_manage(group_command(OWNER), managed)
+    assert not can_manage(group_command(STRANGER), managed)
+    assert can_manage(private, managed)

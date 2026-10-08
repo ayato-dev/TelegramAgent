@@ -199,14 +199,27 @@ class EditSink:
         self._ticker = Ticker(self._flush, interval, None)
 
     async def start(self) -> None:
-        message = await retrying(
-            lambda: self._bot.send_message(
-                chat_id=self._chat_id,
-                text=PLACEHOLDER,
-                message_thread_id=self._thread_id,
-                reply_parameters=reply_parameters(self._reply_to),
+        """A rich placeholder, so later edits stay rich (tables, formulas); plain text as the fallback."""
+        reply = reply_parameters(self._reply_to)
+        try:
+            message = await retrying(
+                lambda: self._bot.send_rich_message(
+                    chat_id=self._chat_id,
+                    rich_message=InputRichMessage(markdown=PLACEHOLDER),
+                    message_thread_id=self._thread_id,
+                    reply_parameters=reply,
+                )
             )
-        )
+        except TelegramBadRequest as exc:
+            log.info("rich placeholder rejected (%s), using plain text", exc.message)
+            message = await retrying(
+                lambda: self._bot.send_message(
+                    chat_id=self._chat_id,
+                    text=PLACEHOLDER,
+                    message_thread_id=self._thread_id,
+                    reply_parameters=reply,
+                )
+            )
         self._message_id = message.message_id
 
     async def on_event(self, event: AgentEvent) -> None:

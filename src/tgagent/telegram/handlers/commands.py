@@ -30,6 +30,16 @@ HELP = """\
 /settings — глубина размышлений и инструменты, /usage — расходы."""
 
 
+NOT_ALLOWED = "Эта команда доступна только тем, кто управляет ботом."
+
+
+def can_manage(message: Message, deps: Deps) -> bool:
+    """Anyone in an allowed group may talk to the bot, but only whitelisted users manage it."""
+    if message.chat.type not in GROUP_TYPES:
+        return True
+    return deps.policy.user_allowed(message.from_user.id if message.from_user else None)
+
+
 @router.message(CommandStart())
 @router.message(Command("help"))
 async def on_help(message: Message, deps: Deps) -> None:
@@ -56,6 +66,9 @@ async def on_new(message: Message, bot: Bot, deps: Deps) -> None:
 
 @router.message(Command("settings"))
 async def on_settings(message: Message, deps: Deps) -> None:
+    if not can_manage(message, deps):
+        await reply_privately(message, NOT_ALLOWED)
+        return
     chat = message.chat
     await deps.chats.upsert(chat.id, chat.type, chat.title)
     options = deps.options(await deps.chats.get_settings(chat.id))
@@ -66,6 +79,9 @@ async def on_settings(message: Message, deps: Deps) -> None:
 
 @router.message(Command("usage"))
 async def on_usage(message: Message, deps: Deps) -> None:
+    if not can_manage(message, deps):
+        await reply_privately(message, NOT_ALLOWED)
+        return
     chat_id = message.chat.id if message.chat.type in GROUP_TYPES else None
     report = await deps.usage_report.render(chat_id=chat_id, now=datetime.now(UTC))
     await reply_privately(message, report, markdown=True)
