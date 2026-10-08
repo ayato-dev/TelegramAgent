@@ -31,3 +31,17 @@ def test_style_saved_and_toggled() -> None:
     assert options_from({"style": "evil"}, default_effort="medium").style == "normal"
     assert toggle(AgentOptions(), "style") == {"style": "troll"}
     assert toggle(AgentOptions(style="troll"), "style") == {"style": "normal"}
+
+
+MODELS = ("anthropic:claude-haiku-5-5", "groq:openai/gpt-oss-120b")
+
+
+def test_saved_model_must_still_be_available() -> None:
+    assert options_from({"model": MODELS[1]}, default_effort="medium", models=MODELS).model == MODELS[1]
+    assert options_from({"model": "openai:gpt-6-luna"}, default_effort="medium", models=MODELS).model is None
+
+
+def test_model_is_picked_by_its_position() -> None:
+    assert toggle(AgentOptions(), "model:1", MODELS) == {"model": MODELS[1]}
+    assert toggle(AgentOptions(), "model:7", MODELS) == {}
+    assert toggle(AgentOptions(), "model:x", MODELS) == {}

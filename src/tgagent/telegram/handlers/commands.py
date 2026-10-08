@@ -10,7 +10,13 @@ from tgagent.services.settings import toggle
 from tgagent.telegram.access import GROUP_TYPES
 from tgagent.telegram.deps import Deps
 from tgagent.telegram.handlers.common import remember_user, reply_privately
-from tgagent.telegram.keyboards import SETTINGS_PREFIX, settings_keyboard, settings_text
+from tgagent.telegram.keyboards import (
+    SETTINGS_PREFIX,
+    models_keyboard,
+    models_text,
+    settings_keyboard,
+    settings_text,
+)
 
 log = logging.getLogger(__name__)
 router = Router(name="commands")
@@ -72,8 +78,11 @@ async def on_settings(message: Message, deps: Deps) -> None:
     chat = message.chat
     await deps.chats.upsert(chat.id, chat.type, chat.title)
     options = deps.options(await deps.chats.get_settings(chat.id))
+    model = deps.model(options)
     await reply_privately(
-        message, settings_text(options, group=chat.type in GROUP_TYPES), markup=settings_keyboard(options)
+        message,
+        settings_text(options, model, group=chat.type in GROUP_TYPES),
+        markup=settings_keyboard(options, model, pickable=len(deps.models) > 1),
     )
 
 
@@ -94,12 +103,17 @@ async def on_settings_button(query: CallbackQuery, bot: Bot, deps: Deps) -> None
         await query.answer("Сообщение с настройками устарело, вызовите /settings ещё раз.")
         return
     chat_id = message.chat.id
+    action = (query.data or "").removeprefix(SETTINGS_PREFIX)
     options = deps.options(await deps.chats.get_settings(chat_id))
-    patch = toggle(options, (query.data or "").removeprefix(SETTINGS_PREFIX))
+    patch = toggle(options, action, deps.model_keys)
     if patch:
         options = deps.options(await deps.chats.update_settings(chat_id, patch))
-    text = settings_text(options, group=message.chat.type in GROUP_TYPES)
-    markup = settings_keyboard(options)
+    model = deps.model(options)
+    if action == "models":
+        text, markup = models_text(model), models_keyboard(deps.models, model.key)
+    else:
+        text = settings_text(options, model, group=message.chat.type in GROUP_TYPES)
+        markup = settings_keyboard(options, model, pickable=len(deps.models) > 1)
     try:
         if message.ephemeral_message_id:
             await bot.edit_ephemeral_message_text(
@@ -116,4 +130,7 @@ async def on_settings_button(query: CallbackQuery, bot: Bot, deps: Deps) -> None
     except TelegramBadRequest as exc:
         if "message is not modified" not in exc.message:
             log.warning("could not update settings message: %s", exc.message)
-    await query.answer("Сохранено" if patch else None)
+    if "model" in patch:
+        await query.answer(f"Модель: {model.label}. Следующее сообщение начнёт новый разговор.")
+    else:
+        await query.answer("Сохранено" if patch else None)

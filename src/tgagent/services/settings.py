@@ -1,3 +1,4 @@
+from collections.abc import Collection, Sequence
 from dataclasses import replace
 from typing import Any, get_args
 
@@ -9,7 +10,9 @@ STYLES: tuple[Style, ...] = get_args(Style)
 FLAGS = ("show_thinking", "web", "code")
 
 
-def options_from(saved: dict[str, Any], *, default_effort: Effort) -> AgentOptions:
+def options_from(
+    saved: dict[str, Any], *, default_effort: Effort, models: Collection[str] = ()
+) -> AgentOptions:
     options = AgentOptions(effort=default_effort)
     if saved.get("effort") in EFFORTS:
         options = replace(options, effort=saved["effort"])
@@ -18,11 +21,16 @@ def options_from(saved: dict[str, Any], *, default_effort: Effort) -> AgentOptio
             options = replace(options, **{flag: saved[flag]})
     if saved.get("style") in STYLES:
         options = replace(options, style=saved["style"])
+    if saved.get("model") in models:
+        options = replace(options, model=saved["model"])
     return options
 
 
-def toggle(options: AgentOptions, action: str) -> dict[str, Any]:
-    """Settings patch for a keyboard action: ``effort:<level>`` or a flag name to flip."""
+def toggle(options: AgentOptions, action: str, models: Sequence[str] = ()) -> dict[str, Any]:
+    """Settings patch for a keyboard action: ``effort:<level>``, ``model:<position>`` or a flag to flip."""
+    if action.startswith("model:"):
+        position = action.removeprefix("model:")
+        return {"model": models[int(position)]} if position.isdigit() and int(position) < len(models) else {}
     if action.startswith("effort:"):
         level = action.removeprefix("effort:")
         return {"effort": level} if level in EFFORTS else {}

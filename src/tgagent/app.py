@@ -149,7 +149,14 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
         bot_name=me.first_name,
         on_title=TopicTitler(runners, bot, conversations, usage),
     )
-    delivery = ReminderDelivery(bot, turns, chats, users, default_effort=settings.default_effort)
+    delivery = ReminderDelivery(
+        bot,
+        turns,
+        chats,
+        users,
+        default_effort=settings.default_effort,
+        models=[spec.key for spec in runners.models],
+    )
 
     deps = Deps(
         settings=settings,
@@ -164,6 +171,7 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
         locks=KeyedLocks(),
         generations=GenerationRegistry(),
         albums=AlbumCollector(),
+        models=tuple(runners.models),
     )
     dispatcher = build_dispatcher(deps, bot)
     await setup_commands(bot)

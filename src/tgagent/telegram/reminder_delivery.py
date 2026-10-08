@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from datetime import datetime
 
 from aiogram import Bot
@@ -24,6 +24,7 @@ class ReminderDelivery:
         users: UserRepo,
         *,
         default_effort: Effort,
+        models: Collection[str] = (),
         clock: Callable[[], datetime] = utc_now,
     ) -> None:
         self._bot = bot
@@ -31,6 +32,7 @@ class ReminderDelivery:
         self._chats = chats
         self._users = users
         self._default_effort = default_effort
+        self._models = models
         self._clock = clock
 
     async def __call__(self, item: ReminderRecord) -> None:
@@ -57,7 +59,9 @@ class ReminderDelivery:
             text=f"[Запланированное задание #{item.id} — выполни его сейчас и пришли результат]\n{item.text}",
         )
         options = options_from(
-            await self._chats.get_settings(item.chat_id), default_effort=self._default_effort
+            await self._chats.get_settings(item.chat_id),
+            default_effort=self._default_effort,
+            models=self._models,
         )
         request = TurnRequest(
             kind="reminder",

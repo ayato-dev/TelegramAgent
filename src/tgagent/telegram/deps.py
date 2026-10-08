@@ -3,6 +3,7 @@ from typing import Any
 
 from aiogram.types import User
 
+from tgagent.agent.models import ModelSpec
 from tgagent.agent.tools import AgentOptions
 from tgagent.config import Settings
 from tgagent.services.generation import GenerationRegistry, KeyedLocks
@@ -30,10 +31,20 @@ class Deps:
     locks: KeyedLocks
     generations: GenerationRegistry
     albums: AlbumCollector
+    # Models the bot can run, the default one included.
+    models: tuple[ModelSpec, ...]
 
     @property
     def username(self) -> str:
         return self.me.username or ""
 
+    @property
+    def model_keys(self) -> list[str]:
+        return [spec.key for spec in self.models]
+
     def options(self, saved: dict[str, Any]) -> AgentOptions:
-        return options_from(saved, default_effort=self.settings.default_effort)
+        return options_from(saved, default_effort=self.settings.default_effort, models=self.model_keys)
+
+    def model(self, options: AgentOptions) -> ModelSpec:
+        key = options.model or self.settings.default_model
+        return next(spec for spec in self.models if spec.key == key)
