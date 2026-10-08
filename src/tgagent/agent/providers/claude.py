@@ -1,12 +1,15 @@
+"""Anthropic Messages API: server compaction, web search/fetch, code execution, Files API."""
+
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from pathlib import PurePosixPath
 from typing import Any
 
 from anthropic import AsyncAnthropic
 from anthropic.types.beta import BetaMessage
 
+from tgagent.agent.base import summarize_tool
 from tgagent.agent.events import (
     AgentEvent,
     ContainerInfo,
@@ -16,31 +19,19 @@ from tgagent.agent.events import (
     ToolStarted,
     TurnResult,
 )
+from tgagent.agent.models import CATALOG, ModelSpec
 from tgagent.agent.pricing import TurnUsage
-from tgagent.agent.prompt import STYLE_PROMPTS, SYSTEM_PROMPT
+from tgagent.agent.prompt import system_prompt
 from tgagent.agent.tools import AgentOptions, ToolContext, ToolRegistry, server_tool_specs
-from tgagent.storage.repos import Content, Role
+from tgagent.context.builder import ContentBuilder, TurnInput
+from tgagent.context.tree import build_api_messages
+from tgagent.storage.repos import Content, NodeRecord, Role
 
 log = logging.getLogger(__name__)
 
 BETAS = ["compact-2026-01-12", "thinking-binding-controls-2026-08-01"]
 MAX_PAUSE_CONTINUATIONS = 5
 TRUNCATED = {"max_tokens", "model_context_window_exceeded", "refusal", "pause_turn"}
-
-
-def system_prompt(options: AgentOptions) -> str:
-    style = STYLE_PROMPTS[options.style]
-    return f"{SYSTEM_PROMPT}\n{style}" if style else SYSTEM_PROMPT
-
-
-def _summarize_tool(name: str, payload: Any) -> str:
-    args = payload if isinstance(payload, dict) else {}
-    for key in ("query", "url", "command", "path", "code"):
-        value = args.get(key)
-        if isinstance(value, str) and value:
-            first_line = value.strip().splitlines()[0]
-            return first_line[:80]
-    return ""
 
 
 def _map_stream_event(event: Any) -> AgentEvent | None:
@@ -53,7 +44,7 @@ def _map_stream_event(event: Any) -> AgentEvent | None:
             return ToolStarted("compaction", "")
         case "content_block_stop" if event.content_block.type == "server_tool_use":
             block = event.content_block
-            return ToolStarted(block.name, _summarize_tool(block.name, block.input))
+            return ToolStarted(block.name, summarize_tool(block.input))
     return None
 
 
@@ -89,33 +80,59 @@ def _output_file_ids(content: Content) -> list[str]:
     return ids
 
 
-class AgentRunner:
+class ClaudeRunner:
     """Runs one agent turn: streams Claude, executes client tools, yields events, then a TurnResult."""
 
     def __init__(
         self,
         client: AsyncAnthropic,
+        spec: ModelSpec,
         *,
-        model: str,
-        max_tokens: int,
-        compaction_trigger: int,
+        builder: ContentBuilder,
         registry: ToolRegistry,
-        web_supported: bool,
         web_max_uses: int,
         max_rounds: int = 8,
     ) -> None:
+        self.spec = spec
         self._client = client
-        self._model = model
-        self._max_tokens = max_tokens
-        self._compaction_trigger = compaction_trigger
+        self._builder = builder
         self._registry = registry
-        self._web_supported = web_supported
         self._web_max_uses = web_max_uses
+        self._web_supported: bool | None = spec.web if spec.key in CATALOG else None
         self.max_rounds = max_rounds
 
-    @property
-    def model(self) -> str:
-        return self._model
+    async def encode_user(self, turn: TurnInput, *, include_author: bool, code_enabled: bool) -> Content:
+        return await self._builder.build(turn, include_author=include_author, code_enabled=code_enabled)
+
+    async def complete(self, prompt: str, *, max_tokens: int) -> tuple[str, TurnUsage]:
+        response = await self._client.beta.messages.create(
+            model=self.spec.model_id,
+            max_tokens=max_tokens,
+            thinking={"type": "disabled"},
+            output_config={"effort": "low"},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        usage = TurnUsage()
+        usage.add(response.usage)
+        return "".join(block.text for block in response.content if block.type == "text"), usage
+
+    async def _web_available(self) -> bool:
+        """Catalog models are known; for others ask the Models API once."""
+        if self._web_supported is None:
+            self._web_supported = await self._web_search_supported()
+        return self._web_supported
+
+    async def _web_search_supported(self) -> bool:
+        try:
+            info = await self._client.models.retrieve(self.spec.model_id)
+        except Exception:
+            log.warning("Models API unavailable, assuming web search is supported", exc_info=True)
+            return True
+        tools = info.capabilities.server_tools if info.capabilities else None
+        supported = tools is None or tools.web_search is None or bool(tools.web_search.supported)
+        if not supported:
+            log.warning("%s does not support web search; web tools disabled", self.spec.model_id)
+        return supported
 
     def _params(
         self,
@@ -124,18 +141,17 @@ class AgentRunner:
         container_id: str | None,
         *,
         tools_allowed: bool,
+        web_supported: bool,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {
-            "model": self._model,
-            "max_tokens": self._max_tokens,
+            "model": self.spec.model_id,
+            "max_tokens": self.spec.max_output,
             "system": [
                 {"type": "text", "text": system_prompt(options), "cache_control": {"type": "ephemeral"}}
             ],
             "messages": messages,
             "tools": [
-                *server_tool_specs(
-                    options, web_supported=self._web_supported, web_max_uses=self._web_max_uses
-                ),
+                *server_tool_specs(options, web_supported=web_supported, web_max_uses=self._web_max_uses),
                 *self._registry.specs,
             ],
             "thinking": {
@@ -148,7 +164,7 @@ class AgentRunner:
                 "edits": [
                     {
                         "type": "compact_20260112",
-                        "trigger": {"type": "input_tokens", "value": self._compaction_trigger},
+                        "trigger": {"type": "input_tokens", "value": self.spec.context_trigger},
                     }
                 ]
             },
@@ -175,13 +191,14 @@ class AgentRunner:
 
     async def run(
         self,
-        messages: list[dict[str, Any]],
+        path: Sequence[NodeRecord],
         options: AgentOptions,
         ctx: ToolContext,
         *,
         container_id: str | None = None,
     ) -> AsyncIterator[AgentEvent]:
-        history = list(messages)
+        history = build_api_messages(path)
+        web_supported = options.web and await self._web_available()
         nodes: list[tuple[Role, Content]] = []
         usage = TurnUsage()
         texts: list[str] = []
@@ -197,7 +214,9 @@ class AgentRunner:
             request = history + ([{"role": "assistant", "content": pending}] if pending else [])
             if texts and pending is None:
                 yield TextDelta("\n\n")
-            params = self._params(request, options, container_id, tools_allowed=tools_allowed)
+            params = self._params(
+                request, options, container_id, tools_allowed=tools_allowed, web_supported=web_supported
+            )
             started = time.monotonic()
             first_event: float | None = None
             async with self._client.beta.messages.stream(**params) as stream:
@@ -254,7 +273,7 @@ class AgentRunner:
             for block in message.content:
                 if block.type != "tool_use":
                     continue
-                yield ToolStarted(block.name, _summarize_tool(block.name, block.input))
+                yield ToolStarted(block.name, summarize_tool(block.input))
                 outcome = await self._registry.execute(block.name, dict(block.input), ctx)
                 results.append(
                     {

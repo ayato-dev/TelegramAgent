@@ -70,6 +70,12 @@ class FakeMessages:
     def __init__(self, script: list[tuple[Sequence[Any], BetaMessage]]) -> None:
         self._script = list(script)
         self.calls: list[dict[str, Any]] = []
+        self.created: list[BetaMessage] = []
+        self.create_calls: list[dict[str, Any]] = []
+
+    async def create(self, **params: Any) -> BetaMessage:
+        self.create_calls.append(params)
+        return self.created.pop(0)
 
     def stream(self, **params: Any) -> FakeStream:
         self.calls.append(params)
@@ -97,11 +103,22 @@ class FakeFiles:
         return SimpleNamespace(filename=name, mime_type=mime)
 
 
+class FakeModels:
+    def __init__(self) -> None:
+        self.info = SimpleNamespace(capabilities=None)
+        self.retrieved: list[str] = []
+
+    async def retrieve(self, model: str) -> SimpleNamespace:
+        self.retrieved.append(model)
+        return self.info
+
+
 class FakeAnthropic:
     def __init__(self, script: list[tuple[Sequence[Any], BetaMessage]]) -> None:
         self.messages = FakeMessages(script)
         self.beta = SimpleNamespace(messages=self.messages)
         self.files = FakeFiles()
+        self.models = FakeModels()
 
     def as_client(self) -> AsyncAnthropic:
         return cast(AsyncAnthropic, self)

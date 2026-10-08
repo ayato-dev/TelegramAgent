@@ -5,43 +5,64 @@ from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import pytest
+from sqlalchemy import select
 
 from tgagent.agent.events import AgentEvent, FileProduced, TextDelta, TurnResult
+from tgagent.agent.models import CATALOG, ModelSpec
 from tgagent.agent.pricing import TurnUsage
-from tgagent.agent.runner import AgentRunner
+from tgagent.agent.registry import ProviderRegistry
 from tgagent.agent.tools import AgentOptions, ToolContext
-from tgagent.context.builder import ContentBuilder
+from tgagent.context.builder import ContentBuilder, TurnInput
 from tgagent.context.media import MediaService
 from tgagent.domain import NormalizedMessage
 from tgagent.services.turns import ATTACHMENT_TEXT, TurnRequest, TurnService
 from tgagent.storage.db import SessionFactory
-from tgagent.storage.repos import ChatLogRepo, ConversationRepo, UsageRepo
+from tgagent.storage.models import UsageEvent
+from tgagent.storage.repos import ChatLogRepo, Content, ConversationRepo, NodeRecord, UsageRepo
 
 pytestmark = pytest.mark.db
 
 TEXT = {"type": "text", "text": "ответ"}
+HAIKU = CATALOG["anthropic:claude-haiku-5-5"]
+OSS = CATALOG["groq:openai/gpt-oss-120b"]
+
+
+class NoMedia:
+    async def describe(self, *args: Any, **kwargs: Any) -> None:
+        raise AssertionError("no media in these tests")
 
 
 class ScriptedRunner:
-    model = "claude-haiku-5-5"
-
     def __init__(
-        self, results: list[TurnResult], *, hang: bool = False, error: Exception | None = None
+        self,
+        results: list[TurnResult],
+        *,
+        spec: ModelSpec = HAIKU,
+        hang: bool = False,
+        error: Exception | None = None,
     ) -> None:
+        self.spec = spec
         self.results = results
         self.hang = hang
         self.error = error
         self.received: list[list[dict[str, Any]]] = []
+        self._builder = ContentBuilder(cast(MediaService, NoMedia()), ZoneInfo("UTC"))
+
+    async def encode_user(self, turn: TurnInput, *, include_author: bool, code_enabled: bool) -> Content:
+        return await self._builder.build(turn, include_author=include_author, code_enabled=code_enabled)
+
+    async def complete(self, prompt: str, *, max_tokens: int) -> tuple[str, TurnUsage]:
+        raise AssertionError("not used")
 
     async def run(
         self,
-        messages: list[dict[str, Any]],
+        path: Sequence[NodeRecord],
         options: AgentOptions,
         ctx: ToolContext,
         *,
         container_id: str | None = None,
     ) -> AsyncIterator[AgentEvent]:
-        self.received.append(messages)
+        self.received.append([{"role": node.role, "content": node.content} for node in path])
         if self.error is not None:
             raise self.error
         yield TextDelta("част")
@@ -73,17 +94,16 @@ class RecordingSink:
         self.failed.append(text)
 
 
-class NoMedia:
-    async def describe(self, *args: Any, **kwargs: Any) -> None:
-        raise AssertionError("no media in these tests")
-
-
-def result(*nodes: tuple[str, list[dict[str, Any]]], refused: bool = False) -> TurnResult:
+def result(
+    *nodes: tuple[str, list[dict[str, Any]]], refused: bool = False, prompt_tokens: int = 0
+) -> TurnResult:
+    usage = TurnUsage()
+    usage.add_iteration(prompt_tokens, 5, 0, 0)
     return TurnResult(
         nodes=list(nodes),  # type: ignore[arg-type]
         text="ответ",
         thinking="",
-        usage=TurnUsage(),
+        usage=usage,
         container=None,
         stop_reason="refusal" if refused else "end_turn",
         refused=refused,
@@ -105,11 +125,15 @@ def message(
     )
 
 
-def service(sessions: SessionFactory, runner: ScriptedRunner) -> TurnService:
-    builder = ContentBuilder(cast(MediaService, NoMedia()), ZoneInfo("UTC"))
+def service(sessions: SessionFactory, *runners: ScriptedRunner) -> TurnService:
+    by_key = {runner.spec.key: runner for runner in runners}
+    registry = ProviderRegistry(
+        [runner.spec for runner in runners],
+        runners[0].spec.key,
+        {runner.spec.provider: lambda spec: by_key[spec.key] for runner in runners},
+    )
     return TurnService(
-        cast(AgentRunner, runner),
-        builder,
+        registry,
         ConversationRepo(sessions),
         UsageRepo(sessions),
         ChatLogRepo(sessions),
@@ -117,8 +141,16 @@ def service(sessions: SessionFactory, runner: ScriptedRunner) -> TurnService:
     )
 
 
-def private(trigger: NormalizedMessage) -> TurnRequest:
-    return TurnRequest(kind="private", chat_id=7, thread_id=None, chat_title=None, user_id=1, trigger=trigger)
+def private(trigger: NormalizedMessage, model: str | None = None) -> TurnRequest:
+    return TurnRequest(
+        kind="private",
+        chat_id=7,
+        thread_id=None,
+        chat_title=None,
+        user_id=1,
+        trigger=trigger,
+        options=AgentOptions(model=model),
+    )
 
 
 async def test_private_turn_persists_nodes_head_mapping_and_usage(sessions: SessionFactory) -> None:
@@ -283,3 +315,80 @@ async def test_rejected_attachment_gets_a_clear_message(sessions: SessionFactory
     await service(sessions, ScriptedRunner([], error=error)).run(private(message(1, "что в файле?")), sink)
 
     assert sink.failed == [ATTACHMENT_TEXT]
+
+
+async def test_changing_the_model_starts_a_fresh_private_conversation(sessions: SessionFactory) -> None:
+    haiku = ScriptedRunner([result(("assistant", [TEXT]))])
+    oss = ScriptedRunner([result(("assistant", [TEXT]))], spec=OSS)
+    turns = service(sessions, haiku, oss)
+    await turns.run(private(message(1, "раз")), RecordingSink())
+
+    await turns.run(private(message(2, "два"), model=OSS.key), RecordingSink())
+
+    assert [m["role"] for m in oss.received[0]] == ["user"]
+    assert "<environment" in oss.received[0][0]["content"][0]["text"]
+    active = await ConversationRepo(sessions).active(7, None)
+    assert active is not None
+    assert active.model == OSS.key
+
+
+async def test_reply_continues_in_the_conversations_own_model(sessions: SessionFactory) -> None:
+    haiku = ScriptedRunner([result(("assistant", [TEXT])), result(("assistant", [TEXT]))])
+    oss = ScriptedRunner([], spec=OSS)
+    turns = service(sessions, haiku, oss)
+    await turns.run(private(message(1, "раз")), RecordingSink())
+
+    await turns.run(private(message(2, "а подробнее?", reply_to=501), model=OSS.key), RecordingSink())
+
+    assert [m["role"] for m in haiku.received[1]] == ["user", "assistant", "user"]
+    assert oss.received == []
+
+
+async def test_empty_conversation_is_pinned_to_the_chosen_model(sessions: SessionFactory) -> None:
+    repo = ConversationRepo(sessions)
+    created = await repo.create(7, None, "private", title_pending=True)
+    oss = ScriptedRunner([result(("assistant", [TEXT]))], spec=OSS)
+
+    await service(sessions, ScriptedRunner([]), oss).run(
+        private(message(1, "привет"), model=OSS.key), RecordingSink()
+    )
+
+    active = await repo.active(7, None)
+    assert active is not None
+    assert (active.id, active.model) == (created.id, OSS.key)
+
+
+async def test_reply_into_a_conversation_of_a_removed_model_starts_over(sessions: SessionFactory) -> None:
+    repo = ConversationRepo(sessions)
+    old = await repo.create(7, None, "private", model="openai:gpt-6-luna")
+    node = await repo.add_node(old.id, None, "assistant", [TEXT])
+    await repo.map_messages(7, [300], node)
+    await repo.deactivate(7, None)
+    haiku = ScriptedRunner([result(("assistant", [TEXT]))])
+    request = TurnRequest(
+        kind="private",
+        chat_id=7,
+        thread_id=None,
+        chat_title=None,
+        user_id=1,
+        trigger=message(5, "что тут?", reply_to=300),
+        reply_context=(message(300, "старый ответ"),),
+    )
+
+    await service(sessions, haiku).run(request, RecordingSink())
+
+    assert [m["role"] for m in haiku.received[0]] == ["user"]
+    assert "старый ответ" in haiku.received[0][0]["content"][0]["text"]
+
+
+async def test_usage_and_prompt_size_are_recorded_per_model(sessions: SessionFactory) -> None:
+    oss = ScriptedRunner([result(("assistant", [TEXT]), prompt_tokens=1234)], spec=OSS)
+
+    await service(sessions, oss).run(private(message(1, "привет")), RecordingSink())
+
+    active = await ConversationRepo(sessions).active(7, None)
+    assert active is not None
+    assert active.last_prompt_tokens == 1234
+    async with sessions() as session:
+        models = list(await session.scalars(select(UsageEvent.model)))
+    assert models == [OSS.key]

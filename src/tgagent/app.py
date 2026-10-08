@@ -9,8 +9,9 @@ from aiogram import Bot
 from anthropic import AsyncAnthropic
 from groq import AsyncGroq
 
-from tgagent.agent.models import parse_key
-from tgagent.agent.runner import AgentRunner
+from tgagent.agent.models import ModelSpec, available_models, parse_key
+from tgagent.agent.providers.claude import ClaudeRunner
+from tgagent.agent.registry import ProviderRegistry
 from tgagent.config import Settings
 from tgagent.context.builder import ContentBuilder
 from tgagent.context.media import MediaService
@@ -60,19 +61,6 @@ class AnthropicFiles:
         return (await self._client.files.upload(file=(filename, data, mime_type))).id
 
 
-async def web_search_supported(client: AsyncAnthropic, model: str) -> bool:
-    try:
-        info = await client.models.retrieve(model)
-    except Exception:
-        log.warning("Models API unavailable, assuming web search is supported", exc_info=True)
-        return True
-    tools = info.capabilities.server_tools if info.capabilities else None
-    supported = tools is None or tools.web_search is None or tools.web_search.supported
-    if not supported:
-        log.warning("%s does not support web search; web tools disabled", model)
-    return supported
-
-
 async def heartbeat(path: Path) -> None:
     """Docker healthcheck reads this file's age."""
     while True:
@@ -106,7 +94,7 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
 
     bot = Bot(token=settings.telegram_bot_token.get_secret_value())
     stack.push_async_callback(bot.session.close)
-    provider, model = parse_key(settings.default_model)
+    provider, _ = parse_key(settings.default_model)
     anthropic_key, groq_key = settings.api_key("anthropic"), settings.api_key("groq")
     if provider != "anthropic" or anthropic_key is None or groq_key is None:
         raise RuntimeError(
@@ -139,25 +127,27 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
         await delivery(item)
 
     scheduler = ReminderScheduler(reminders, fire)
-    tools = AgentTools(bot, reminders, scheduler, chat_log, media, tz=settings.tz)
-    runner = AgentRunner(
-        anthropic,
-        model=model,
-        max_tokens=settings.max_output_tokens,
-        compaction_trigger=settings.compaction_trigger_tokens,
-        registry=tools.registry(),
-        web_supported=await web_search_supported(anthropic, model),
-        web_max_uses=settings.web_search_max_uses,
-    )
+    tool_registry = AgentTools(bot, reminders, scheduler, chat_log, media, tz=settings.tz).registry()
+    builder = ContentBuilder(media, settings.tz)
+
+    def claude(spec: ModelSpec) -> ClaudeRunner:
+        return ClaudeRunner(
+            anthropic,
+            spec,
+            builder=builder,
+            registry=tool_registry,
+            web_max_uses=settings.web_search_max_uses,
+        )
+
+    runners = ProviderRegistry(available_models(settings), settings.default_model, {"anthropic": claude})
     turns = TurnService(
-        runner,
-        ContentBuilder(media, settings.tz),
+        runners,
         conversations,
         usage,
         chat_log,
         tz=settings.tz,
         bot_name=me.first_name,
-        on_title=TopicTitler(anthropic, bot, conversations, usage, model),
+        on_title=TopicTitler(runners, bot, conversations, usage),
     )
     delivery = ReminderDelivery(bot, turns, chats, users, default_effort=settings.default_effort)
 

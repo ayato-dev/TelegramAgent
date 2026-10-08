@@ -2,9 +2,14 @@ from decimal import Decimal
 
 from anthropic.types.beta import BetaUsage
 
-from tgagent.agent.pricing import TurnUsage, claude_cost, whisper_cost
+from tgagent.agent.models import CATALOG
+from tgagent.agent.pricing import TurnUsage, turn_cost, whisper_cost
 
 ITERATION = {"cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+
+
+def claude_cost(model: str, usage: TurnUsage) -> Decimal:
+    return turn_cost(CATALOG[f"anthropic:{model}"], usage)
 
 
 def usage(**fields: object) -> BetaUsage:

@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
-from tgagent.agent.pricing import PRICING, ModelPricing, RateCard
+from tgagent.agent.pricing import ModelPricing, RateCard
 
 if TYPE_CHECKING:
     from tgagent.config import Settings
@@ -52,6 +52,21 @@ class ModelSpec:
     free: bool = False
     # DeepSeek: half price outside peak hours.
     off_peak: bool = False
+
+
+def _card(input_: str, output: str, cache_write: str, cache_read: str) -> RateCard:
+    return RateCard(Decimal(input_), Decimal(output), Decimal(cache_write), Decimal(cache_read))
+
+
+# Haiku 5.5 bills prompts over 100K tokens at the long-context rate; Sonnet and Opus 5.5 price
+# the full 1M context the same, with $0.20 cache reads on both.
+HAIKU_5_5 = ModelPricing(
+    _card("0.10", "0.50", "0.125", "0.01"),
+    _card("0.50", "2.50", "0.625", "0.05"),
+    long_prompt_threshold=100_000,
+)
+SONNET_5_5 = ModelPricing(_card("2", "10", "2.50", "0.20"), _card("2", "10", "2.50", "0.20"), 10**9)
+OPUS_5_5 = ModelPricing(_card("4", "20", "5", "0.20"), _card("4", "20", "5", "0.20"), 10**9)
 
 
 def _flat(input_: str, output: str, cache_read: str) -> ModelPricing:
@@ -104,9 +119,9 @@ def _entry(provider: Provider, model_id: str, label: str, pricing: ModelPricing,
 
 
 _ENTRIES = (
-    _entry("anthropic", "claude-haiku-5-5", "Claude Haiku 5.5", PRICING["claude-haiku-5-5"]),
-    _entry("anthropic", "claude-sonnet-5-5", "Claude Sonnet 5.5", PRICING["claude-sonnet-5-5"]),
-    _entry("anthropic", "claude-opus-5-5", "Claude Opus 5.5", PRICING["claude-opus-5-5"]),
+    _entry("anthropic", "claude-haiku-5-5", "Claude Haiku 5.5", HAIKU_5_5),
+    _entry("anthropic", "claude-sonnet-5-5", "Claude Sonnet 5.5", SONNET_5_5),
+    _entry("anthropic", "claude-opus-5-5", "Claude Opus 5.5", OPUS_5_5),
     _entry("openai", "gpt-6-luna", "GPT-6 Luna", _openai("0.10", "0.50", "0.01")),
     _entry("openai", "gpt-6.1-sol", "GPT-6.1 Sol", _openai("2", "10", "0.10")),
     _entry("openai", "gpt-6-astra", "GPT-6 Astra", _openai("10", "50", "1")),

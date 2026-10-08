@@ -22,6 +22,8 @@ class AgentOptions:
     web: bool = True
     code: bool = True
     style: Style = "normal"
+    # provider:model-id chosen for the chat; None means DEFAULT_MODEL.
+    model: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

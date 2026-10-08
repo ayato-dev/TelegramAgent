@@ -1,12 +1,11 @@
 from datetime import UTC, datetime
 from decimal import Decimal
-from types import SimpleNamespace
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-from anthropic import AsyncAnthropic
-from anthropic.types.beta import BetaUsage
-
+from tgagent.agent.models import CATALOG
+from tgagent.agent.pricing import TurnUsage
+from tgagent.agent.registry import ProviderRegistry
 from tgagent.services.titles import TopicTitler, clean_title
 from tgagent.services.usage_report import UsageReport
 from tgagent.storage.repos import (
@@ -26,14 +25,29 @@ def test_clean_title() -> None:
     assert len(clean_title("слово " * 40) or "") <= 64
 
 
-class FakeMessages:
-    def __init__(self) -> None:
-        self.params: dict[str, Any] = {}
+class FakeTitleRunner:
+    spec = CATALOG["groq:openai/gpt-oss-120b"]
 
-    async def create(self, **params: Any) -> SimpleNamespace:
-        self.params = params
-        usage = BetaUsage.model_validate({"input_tokens": 100, "output_tokens": 10})
-        return SimpleNamespace(content=[SimpleNamespace(type="text", text='"Рецепт борща"')], usage=usage)
+    def __init__(self) -> None:
+        self.prompts: list[tuple[str, int]] = []
+
+    async def complete(self, prompt: str, *, max_tokens: int) -> tuple[str, TurnUsage]:
+        self.prompts.append((prompt, max_tokens))
+        usage = TurnUsage()
+        usage.add_iteration(100, 10, 0, 0)
+        return '"Рецепт борща"', usage
+
+
+class FakeRegistry:
+    default_model = "anthropic:claude-haiku-5-5"
+
+    def __init__(self) -> None:
+        self.title_runner = FakeTitleRunner()
+        self.asked: list[str] = []
+
+    def runner(self, key: str) -> FakeTitleRunner:
+        self.asked.append(key)
+        return self.title_runner
 
 
 class FakeTopicBot:
@@ -61,25 +75,24 @@ class FakeUsage:
         self.records.append(record)
 
 
-async def test_titler_renames_topic_and_records_usage() -> None:
-    messages = FakeMessages()
-    client = cast(AsyncAnthropic, SimpleNamespace(beta=SimpleNamespace(messages=messages)))
+async def test_titler_uses_the_conversations_model_and_records_usage() -> None:
+    registry = FakeRegistry()
     bot, conversations, usage = FakeTopicBot(), FakeConversations(), FakeUsage()
     titler = TopicTitler(
-        client,
-        bot,
+        cast(ProviderRegistry, registry),
+        bot,  # type: ignore[arg-type]
         cast(ConversationRepo, conversations),
         cast(UsageRepo, usage),
-        "claude-haiku-5-5",  # type: ignore[arg-type]
     )
-    conversation = ConversationRecord(3, 7, 11, "private", None, True, None, None)
+    conversation = ConversationRecord(3, 7, 11, "private", None, True, None, None, "groq:openai/gpt-oss-120b")
 
     await titler(conversation, "как сварить борщ?", "Возьмите свёклу…")
 
     assert bot.edits == [{"chat_id": 7, "message_thread_id": 11, "name": "Рецепт борща"}]
     assert conversations.cleared == [3]
-    assert usage.records[0].kind == "title"
-    assert messages.params["output_config"] == {"effort": "low"}
+    assert registry.asked == ["groq:openai/gpt-oss-120b"]
+    assert "как сварить борщ?" in registry.title_runner.prompts[0][0]
+    assert (usage.records[0].kind, usage.records[0].model) == ("title", "groq:openai/gpt-oss-120b")
 
 
 class FakeTotals:

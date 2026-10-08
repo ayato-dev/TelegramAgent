@@ -32,20 +32,6 @@ class ModelPricing:
         return self.long if prompt_tokens > self.long_prompt_threshold else self.short
 
 
-HAIKU_5_5 = ModelPricing(
-    short=RateCard(Decimal("0.10"), Decimal("0.50"), Decimal("0.125"), Decimal("0.01")),
-    long=RateCard(Decimal("0.50"), Decimal("2.50"), Decimal("0.625"), Decimal("0.05")),
-    long_prompt_threshold=100_000,
-)
-# Sonnet and Opus 5.5 price the full 1M context the same; cache reads are $0.20 on both.
-SONNET_5_5_CARD = RateCard(Decimal("2"), Decimal("10"), Decimal("2.50"), Decimal("0.20"))
-OPUS_5_5_CARD = RateCard(Decimal("4"), Decimal("20"), Decimal("5"), Decimal("0.20"))
-PRICING = {
-    "claude-haiku-5-5": HAIKU_5_5,
-    "claude-sonnet-5-5": ModelPricing(SONNET_5_5_CARD, SONNET_5_5_CARD, long_prompt_threshold=1_000_000),
-    "claude-opus-5-5": ModelPricing(OPUS_5_5_CARD, OPUS_5_5_CARD, long_prompt_threshold=1_000_000),
-}
-WEB_SEARCH_PRICE = Decimal("0.01")
 WHISPER_PRICE_PER_HOUR = {"whisper-large-v3": Decimal("0.111"), "whisper-large-v3-turbo": Decimal("0.04")}
 WHISPER_MIN_BILLED_SECONDS = 10
 
@@ -93,6 +79,11 @@ class TurnUsage:
             self.web_search_requests += usage.server_tool_use.web_search_requests or 0
 
     @property
+    def last_prompt_tokens(self) -> int:
+        """Prompt size of the latest request: how full the context is now."""
+        return self.iterations[-1].prompt_tokens if self.iterations else 0
+
+    @property
     def input_tokens(self) -> int:
         return sum(it.input_tokens for it in self.iterations)
 
@@ -120,10 +111,6 @@ def _token_cost(pricing: ModelPricing, usage: TurnUsage) -> Decimal:
             + it.cache_write_tokens * card.cache_write
         ) / MTOK
     return total
-
-
-def claude_cost(model: str, usage: TurnUsage) -> Decimal:
-    return _token_cost(PRICING.get(model, HAIKU_5_5), usage) + usage.web_search_requests * WEB_SEARCH_PRICE
 
 
 def deepseek_peak(now: datetime) -> bool:

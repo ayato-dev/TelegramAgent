@@ -2,9 +2,9 @@ import logging
 import re
 
 from aiogram import Bot
-from anthropic import AsyncAnthropic
 
-from tgagent.agent.pricing import TurnUsage, claude_cost
+from tgagent.agent.pricing import turn_cost
+from tgagent.agent.registry import ProviderRegistry
 from tgagent.storage.repos import ConversationRecord, ConversationRepo, UsageRecord, UsageRepo
 
 log = logging.getLogger(__name__)
@@ -31,18 +31,12 @@ class TopicTitler:
     """Names a private-chat topic that the user created without an explicit name."""
 
     def __init__(
-        self,
-        client: AsyncAnthropic,
-        bot: Bot,
-        conversations: ConversationRepo,
-        usage: UsageRepo,
-        model: str,
+        self, runners: ProviderRegistry, bot: Bot, conversations: ConversationRepo, usage: UsageRepo
     ) -> None:
-        self._client = client
+        self._runners = runners
         self._bot = bot
         self._conversations = conversations
         self._usage = usage
-        self._model = model
 
     async def __call__(self, conversation: ConversationRecord, question: str, answer: str) -> None:
         try:
@@ -58,25 +52,16 @@ class TopicTitler:
             await self._conversations.clear_title_pending(conversation.id)
 
     async def _generate(self, conversation: ConversationRecord, question: str, answer: str) -> str | None:
-        response = await self._client.beta.messages.create(
-            model=self._model,
-            max_tokens=1024,
-            thinking={"type": "disabled"},
-            output_config={"effort": "low"},
-            messages=[
-                {"role": "user", "content": PROMPT.format(question=question[:2000], answer=answer[:2000])}
-            ],
-        )
-        usage = TurnUsage()
-        usage.add(response.usage)
+        runner = self._runners.runner(conversation.model or self._runners.default_model)
+        prompt = PROMPT.format(question=question[:2000], answer=answer[:2000])
+        text, usage = await runner.complete(prompt, max_tokens=1024)
         record = UsageRecord(
             None,
             conversation.chat_id,
             "title",
-            self._model,
+            runner.spec.key,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
         )
-        await self._usage.add(record.with_cost(claude_cost(self._model, usage)))
-        text = "".join(block.text for block in response.content if block.type == "text")
+        await self._usage.add(record.with_cost(turn_cost(runner.spec, usage)))
         return clean_title(text)

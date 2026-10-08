@@ -1,6 +1,8 @@
 """The system prompt is frozen: changing it between requests breaks prompt caching and
 invalidates replayed thinking blocks. Everything dynamic goes into user turns."""
 
+from tgagent.agent.tools import AgentOptions
+
 SYSTEM_PROMPT = """\
 Ты — ИИ-агент, живущий в Telegram. С тобой общаются в личных чатах (каждый топик — отдельный разговор), \
 в группах (тебя зовут упоминанием или ответом на твоё сообщение) и по вызову в чужих чатах (гостевой режим, \
@@ -80,3 +82,8 @@ TROLL_STYLE = """\
 """
 
 STYLE_PROMPTS = {"normal": "", "troll": TROLL_STYLE}
+
+
+def system_prompt(options: AgentOptions) -> str:
+    style = STYLE_PROMPTS[options.style]
+    return f"{SYSTEM_PROMPT}\n{style}" if style else SYSTEM_PROMPT

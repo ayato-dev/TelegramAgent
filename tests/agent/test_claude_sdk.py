@@ -1,14 +1,18 @@
 """The runner against the real Anthropic SDK (SSE parsing, request validation) over a mocked transport."""
 
 import json
-from typing import Any
+from dataclasses import replace
+from typing import Any, cast
 
 import httpx2
 from anthropic import AsyncAnthropic
 
 from tgagent.agent.events import TextDelta, ThinkingDelta, ToolStarted, TurnResult
-from tgagent.agent.runner import AgentRunner
+from tgagent.agent.models import CATALOG
+from tgagent.agent.providers.claude import ClaudeRunner
 from tgagent.agent.tools import AgentOptions, ToolContext, ToolRegistry
+from tgagent.context.builder import ContentBuilder
+from tgagent.storage.repos import NodeRecord
 
 CTX = ToolContext(chat_id=1, thread_id=None, user_id=1, chat_kind="private", message_id=1)
 USAGE = {
@@ -95,18 +99,13 @@ async def test_runner_with_real_sdk_stream() -> None:
     client = AsyncAnthropic(
         api_key="test", http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)), max_retries=0
     )
-    runner = AgentRunner(
-        client,
-        model="claude-haiku-5-5",
-        max_tokens=16_000,
-        compaction_trigger=100_000,
-        registry=ToolRegistry({}),
-        web_supported=True,
-        web_max_uses=5,
+    spec = replace(CATALOG["anthropic:claude-haiku-5-5"], context_trigger=100_000, max_output=16_000)
+    runner = ClaudeRunner(
+        client, spec, builder=cast(ContentBuilder, None), registry=ToolRegistry({}), web_max_uses=5
     )
-    messages = [{"role": "user", "content": [{"type": "text", "text": "курс евро?"}]}]
+    path = [NodeRecord(1, 1, None, "user", [{"type": "text", "text": "курс евро?"}], False)]
 
-    events = [e async for e in runner.run(messages, AgentOptions(show_thinking=True), CTX)]
+    events = [e async for e in runner.run(path, AgentOptions(show_thinking=True), CTX)]
 
     assert ThinkingDelta("Считаю") in events
     assert ToolStarted("web_search", "курс евро") in events

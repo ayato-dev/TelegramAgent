@@ -2,19 +2,19 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable, Coroutine, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from html import escape
 from zoneinfo import ZoneInfo
 
 import anthropic
 
+from tgagent.agent.base import LLMRunner
 from tgagent.agent.events import FileProduced, TextDelta, TurnResult
-from tgagent.agent.pricing import claude_cost
-from tgagent.agent.runner import AgentRunner
+from tgagent.agent.pricing import turn_cost
+from tgagent.agent.registry import ProviderRegistry
 from tgagent.agent.tools import AgentOptions, ToolContext
-from tgagent.context.builder import ContentBuilder, TurnInput
-from tgagent.context.tree import build_api_messages
+from tgagent.context.builder import TurnInput
 from tgagent.domain import NormalizedMessage
 from tgagent.storage.repos import (
     ChatLogRepo,
@@ -69,8 +69,7 @@ class TurnService:
 
     def __init__(
         self,
-        runner: AgentRunner,
-        builder: ContentBuilder,
+        runners: ProviderRegistry,
         conversations: ConversationRepo,
         usage: UsageRepo,
         chat_log: ChatLogRepo,
@@ -79,8 +78,7 @@ class TurnService:
         bot_name: str = "бот",
         on_title: TitleCallback | None = None,
     ) -> None:
-        self._runner = runner
-        self._builder = builder
+        self._runners = runners
         self._conversations = conversations
         self._usage = usage
         self._chat_log = chat_log
@@ -90,21 +88,40 @@ class TurnService:
         self._background: set[asyncio.Task[None]] = set()
 
     async def _resolve(self, request: TurnRequest) -> tuple[ConversationRecord, int | None, bool]:
-        """Where the turn attaches: (conversation, parent node, whether a reply picked the branch)."""
+        """Where the turn attaches: (conversation, parent node, whether a reply picked the branch).
+
+        A conversation stays with the model it was started with: replies continue in it, while
+        choosing another model starts a fresh private conversation.
+        """
+        chosen = request.options.model
+        model = chosen if chosen and self._runners.supports(chosen) else self._runners.default_model
         reply_to = request.trigger.reply_to_message_id
         if reply_to is not None:
             node = await self._conversations.node_for_message(request.chat_id, reply_to)
-            if node is not None and (conversation := await self._conversations.get(node.conversation_id)):
+            conversation = await self._conversations.get(node.conversation_id) if node else None
+            if node is not None and conversation and self._runners.supports(conversation.model):
                 return conversation, node.id, True
         if request.kind == "private":
             active = await self._conversations.active(request.chat_id, request.thread_id)
-            if active is not None:
+            if active is not None and active.model == model:
                 return active, active.head_node_id, False
+            if active is not None and active.head_node_id is None:
+                await self._conversations.set_model(active.id, model)
+                return replace(active, model=model), None, False
+            if active is not None:
+                await self._conversations.deactivate(request.chat_id, request.thread_id)
             created = await self._conversations.create(
-                request.chat_id, request.thread_id, "private", title_pending=request.title_pending
+                request.chat_id,
+                request.thread_id,
+                "private",
+                title_pending=request.title_pending,
+                model=model,
             )
             return created, None, False
-        return await self._conversations.create(request.chat_id, request.thread_id, request.kind), None, False
+        created = await self._conversations.create(
+            request.chat_id, request.thread_id, request.kind, model=model
+        )
+        return created, None, False
 
     def _environment(self, request: TurnRequest) -> str:
         attrs = [f'chat="{KIND_LABELS[request.kind]}"']
@@ -116,17 +133,19 @@ class TurnService:
     async def run(self, request: TurnRequest, sink: ResponseSink) -> None:
         started = time.monotonic()
         conversation, parent_id, from_reply = await self._resolve(request)
+        assert conversation.model is not None
+        runner = self._runners.runner(conversation.model)
         turn = TurnInput(
             request.trigger,
             context=() if from_reply else request.reply_context,
             album=request.album,
             environment=self._environment(request) if parent_id is None else None,
         )
-        content = await self._builder.build(
+        content = await runner.encode_user(
             turn, include_author=request.include_author, code_enabled=request.options.code
         )
         user_node = await self._conversations.add_node(conversation.id, parent_id, "user", content)
-        messages = build_api_messages(await self._conversations.path(user_node))
+        path = await self._conversations.path(user_node)
         container = conversation.container_id
         if conversation.container_expires_at and conversation.container_expires_at <= datetime.now(UTC):
             container = None
@@ -141,7 +160,7 @@ class TurnService:
         files: list[FileProduced] = []
         result: TurnResult | None = None
         try:
-            async for event in self._runner.run(messages, request.options, ctx, container_id=container):
+            async for event in runner.run(path, request.options, ctx, container_id=container):
                 if first_output is None:
                     first_output = time.monotonic() - started
                 if isinstance(event, TurnResult):
@@ -174,7 +193,8 @@ class TurnService:
             first_output or 0.0,
             time.monotonic() - started,
         )
-        await self._record_usage(request, result)
+        await self._record_usage(request, runner, result)
+        await self._conversations.set_prompt_tokens(conversation.id, result.usage.last_prompt_tokens)
         if result.refused or not result.nodes:
             await sink.fail(REFUSAL_TEXT)
             return
@@ -245,17 +265,17 @@ class TurnService:
         )
         await self._deliver(request, conversation, node_id, partial + STOPPED_SUFFIX, partial, files, sink)
 
-    async def _record_usage(self, request: TurnRequest, result: TurnResult) -> None:
+    async def _record_usage(self, request: TurnRequest, runner: LLMRunner, result: TurnResult) -> None:
         usage = result.usage
         record = UsageRecord(
             user_id=request.user_id,
             chat_id=request.chat_id,
             kind="chat",
-            model=self._runner.model,
+            model=runner.spec.key,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
             cache_read_tokens=usage.cache_read_tokens,
             cache_write_tokens=usage.cache_write_tokens,
             web_search_requests=usage.web_search_requests,
         )
-        await self._usage.add(record.with_cost(claude_cost(self._runner.model, usage)))
+        await self._usage.add(record.with_cost(turn_cost(runner.spec, usage)))
