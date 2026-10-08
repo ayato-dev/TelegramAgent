@@ -154,7 +154,7 @@ async def test_request_config_follows_design() -> None:
     params = fake.models.calls[0]
     cfg = config(fake)
     assert params["model"] == "gemini-3.8-flash"
-    assert cfg.system_instruction == system_prompt(options)
+    assert cfg.system_instruction == system_prompt(options, paid)
     assert cfg.max_output_tokens == 16_000
     assert cfg.thinking_config == types.ThinkingConfig(
         thinking_level=types.ThinkingLevel.HIGH, include_thoughts=True

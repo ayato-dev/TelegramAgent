@@ -81,7 +81,7 @@ async def test_request_parameters_follow_design() -> None:
 
     params = fake.responses.calls[0]
     assert params["model"] == "gpt-6-luna"
-    assert params["instructions"] == system_prompt(options)
+    assert params["instructions"] == system_prompt(options, LUNA)
     assert (params["store"], params["stream"], params["max_output_tokens"]) == (False, True, 16_000)
     assert params["include"] == ["reasoning.encrypted_content"]
     assert params["reasoning"] == {"effort": "high", "summary": "auto"}

@@ -147,7 +147,11 @@ class ClaudeRunner:
             "model": self.spec.model_id,
             "max_tokens": self.spec.max_output,
             "system": [
-                {"type": "text", "text": system_prompt(options), "cache_control": {"type": "ephemeral"}}
+                {
+                    "type": "text",
+                    "text": system_prompt(options, self.spec),
+                    "cache_control": {"type": "ephemeral"},
+                }
             ],
             "messages": messages,
             "tools": [

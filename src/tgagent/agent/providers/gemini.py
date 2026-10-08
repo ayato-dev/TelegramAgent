@@ -158,7 +158,7 @@ class GeminiRunner:
                     mode=types.FunctionCallingConfigMode.NONE
                 )
         return types.GenerateContentConfig(
-            system_instruction=system_prompt(options),
+            system_instruction=system_prompt(options, self.spec),
             max_output_tokens=self.spec.max_output,
             thinking_config=types.ThinkingConfig(
                 thinking_level=THINKING_LEVELS.get(options.effort), include_thoughts=options.show_thinking

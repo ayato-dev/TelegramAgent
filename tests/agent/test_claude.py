@@ -198,8 +198,8 @@ async def test_each_api_call_logs_timings(caplog: pytest.LogCaptureFixture) -> N
     assert "stop=end_turn" in line
 
 
-async def test_troll_style_extends_system_prompt() -> None:
-    from tgagent.agent.prompt import STYLE_PROMPTS, SYSTEM_PROMPT
+async def test_system_prompt_follows_the_style() -> None:
+    from tgagent.agent.prompt import system_prompt
 
     fake = FakeAnthropic([([], final([TEXT])), ([], final([TEXT]))])
     agent = runner(fake)
@@ -208,8 +208,8 @@ async def test_troll_style_extends_system_prompt() -> None:
     await collect(agent, AgentOptions())
 
     troll, normal = (call["system"][0]["text"] for call in fake.messages.calls)
-    assert troll == SYSTEM_PROMPT + "\n" + STYLE_PROMPTS["troll"]
-    assert normal == SYSTEM_PROMPT
+    assert troll == system_prompt(AgentOptions(style="troll"), HAIKU)
+    assert normal == system_prompt(AgentOptions(), HAIKU)
 
 
 async def test_path_is_sent_as_messages_from_the_latest_compaction() -> None:

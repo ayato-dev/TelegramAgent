@@ -178,7 +178,7 @@ class ResponsesRunner:
             reasoning["summary"] = "auto"
         params: dict[str, Any] = {
             "model": self.spec.model_id,
-            "instructions": system_prompt(options),
+            "instructions": system_prompt(options, self.spec),
             "input": list(history),
             "tools": self._tools(options),
             "reasoning": reasoning,

@@ -163,7 +163,7 @@ async def test_deepseek_request_parameters() -> None:
     params = fake.completions.calls[0]
     assert params["model"] == "deepseek-flash"
     assert params["messages"] == [
-        {"role": "system", "content": system_prompt(options)},
+        {"role": "system", "content": system_prompt(options, DEEPSEEK)},
         {"role": "user", "content": "hi"},
     ]
     assert (params["max_tokens"], params["stream"], params["reasoning_effort"]) == (16_000, True, "max")

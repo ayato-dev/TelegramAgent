@@ -185,7 +185,7 @@ class ChatRunner:
             tools.append({"type": "code_interpreter"})
         params: dict[str, Any] = {
             "model": self.spec.model_id,
-            "messages": [{"role": "system", "content": system_prompt(options)}, *history],
+            "messages": [{"role": "system", "content": system_prompt(options, self.spec)}, *history],
             "max_tokens": self.spec.max_output,
             "reasoning_effort": self._profile.efforts[options.effort],
             "stream": True,
