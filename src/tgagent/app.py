@@ -7,13 +7,21 @@ from pathlib import Path
 
 from aiogram import Bot
 from anthropic import AsyncAnthropic
+from google import genai
 from groq import AsyncGroq
+from openai import AsyncOpenAI
 
-from tgagent.agent.models import ModelSpec, available_models, parse_key
+from tgagent.agent.base import LLMRunner
+from tgagent.agent.models import ModelSpec, Provider, available_models
+from tgagent.agent.providers.chat import ChatRunner
 from tgagent.agent.providers.claude import ClaudeRunner
-from tgagent.agent.registry import ProviderRegistry
+from tgagent.agent.providers.gemini import GeminiRunner
+from tgagent.agent.providers.responses import ResponsesRunner
+from tgagent.agent.registry import ProviderRegistry, RunnerFactory
+from tgagent.agent.tools import ToolRegistry
 from tgagent.config import Settings
 from tgagent.context.builder import ContentBuilder
+from tgagent.context.encoders import ChatEncoder, GeminiEncoder, ResponsesEncoder
 from tgagent.context.media import MediaService
 from tgagent.services.agent_tools import AgentTools
 from tgagent.services.generation import GenerationRegistry, KeyedLocks
@@ -41,6 +49,11 @@ from tgagent.telegram.reminder_delivery import ReminderDelivery
 
 log = logging.getLogger("tgagent")
 
+CHAT_BASE_URLS: dict[Provider, str] = {
+    "deepseek": "https://api.deepseek.com",
+    "groq": "https://api.groq.com/openai/v1",
+}
+
 
 class TelegramFiles:
     def __init__(self, bot: Bot) -> None:
@@ -59,6 +72,78 @@ class AnthropicFiles:
 
     async def upload(self, filename: str, data: bytes, mime_type: str) -> str:
         return (await self._client.files.upload(file=(filename, data, mime_type))).id
+
+
+class OpenAIFiles:
+    def __init__(self, client: AsyncOpenAI) -> None:
+        self._client = client
+
+    async def upload(self, filename: str, data: bytes, mime_type: str) -> str:
+        return (await self._client.files.create(file=(filename, data, mime_type), purpose="user_data")).id
+
+
+def build_runners(
+    settings: Settings,
+    stack: AsyncExitStack,
+    anthropic: AsyncAnthropic | None,
+    media: MediaService,
+    cache: MediaRepo,
+    tools: ToolRegistry,
+) -> ProviderRegistry:
+    """One runner factory per provider with a key; each model gets the media encoding it can read."""
+    tz = settings.tz
+    factories: dict[Provider, RunnerFactory] = {}
+
+    def text_limit(spec: ModelSpec) -> int:
+        # Characters of a document inlined as text: about half of the model's context budget.
+        return spec.context_trigger * 2
+
+    if anthropic is not None:
+        claude_builder = ContentBuilder(media, tz)
+
+        def claude(spec: ModelSpec) -> LLMRunner:
+            web_max_uses = settings.web_search_max_uses
+            return ClaudeRunner(
+                anthropic, spec, builder=claude_builder, registry=tools, web_max_uses=web_max_uses
+            )
+
+        factories["anthropic"] = claude
+
+    if key := settings.api_key("openai"):
+        openai_client = AsyncOpenAI(api_key=key.get_secret_value())
+        stack.push_async_callback(openai_client.close)
+        files = OpenAIFiles(openai_client)
+
+        def openai(spec: ModelSpec) -> LLMRunner:
+            encoder = ResponsesEncoder(media, files, cache, text_limit=text_limit(spec))
+            return ResponsesRunner(openai_client, spec, builder=ContentBuilder(encoder, tz), registry=tools)
+
+        factories["openai"] = openai
+
+    if key := settings.api_key("gemini"):
+        gemini_client = genai.Client(api_key=key.get_secret_value())
+        stack.push_async_callback(gemini_client.aio.aclose)
+
+        def gemini(spec: ModelSpec) -> LLMRunner:
+            encoder = GeminiEncoder(media, text_limit=text_limit(spec))
+            return GeminiRunner(gemini_client, spec, builder=ContentBuilder(encoder, tz), registry=tools)
+
+        factories["gemini"] = gemini
+
+    def chat(client: AsyncOpenAI) -> RunnerFactory:
+        def factory(spec: ModelSpec) -> LLMRunner:
+            encoder = ChatEncoder(media, vision=spec.vision, text_limit=text_limit(spec))
+            return ChatRunner(client, spec, builder=ContentBuilder(encoder, tz), registry=tools)
+
+        return factory
+
+    for provider, base_url in CHAT_BASE_URLS.items():
+        if key := settings.api_key(provider):
+            client = AsyncOpenAI(api_key=key.get_secret_value(), base_url=base_url)
+            stack.push_async_callback(client.close)
+            factories[provider] = chat(client)
+
+    return ProviderRegistry(available_models(settings), settings.default_model, factories)
 
 
 async def heartbeat(path: Path) -> None:
@@ -94,16 +179,16 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
 
     bot = Bot(token=settings.telegram_bot_token.get_secret_value())
     stack.push_async_callback(bot.session.close)
-    provider, _ = parse_key(settings.default_model)
-    anthropic_key, groq_key = settings.api_key("anthropic"), settings.api_key("groq")
-    if provider != "anthropic" or anthropic_key is None or groq_key is None:
-        raise RuntimeError(
-            "this build runs Anthropic models only and needs ANTHROPIC_API_KEY and GROQ_API_KEY"
-        )
-    anthropic = AsyncAnthropic(api_key=anthropic_key.get_secret_value(), max_retries=3)
-    stack.push_async_callback(anthropic.close)
-    groq = AsyncGroq(api_key=groq_key.get_secret_value(), max_retries=2)
-    stack.push_async_callback(groq.close)
+    anthropic: AsyncAnthropic | None = None
+    if key := settings.api_key("anthropic"):
+        anthropic = AsyncAnthropic(api_key=key.get_secret_value(), max_retries=3)
+        stack.push_async_callback(anthropic.close)
+    # Groq also transcribes voice for models that cannot hear it themselves.
+    transcriber: GroqTranscriber | None = None
+    if key := settings.api_key("groq"):
+        groq = AsyncGroq(api_key=key.get_secret_value(), max_retries=2)
+        stack.push_async_callback(groq.close)
+        transcriber = GroqTranscriber(groq, settings.whisper_model)
 
     me = await bot.get_me()
     log.info(
@@ -113,11 +198,12 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
         me.can_read_all_group_messages,
     )
 
+    media_cache = MediaRepo(sessions)
     media = MediaService(
         TelegramFiles(bot),
-        AnthropicFiles(anthropic),
-        GroqTranscriber(groq, settings.whisper_model),
-        MediaRepo(sessions),
+        AnthropicFiles(anthropic) if anthropic else None,
+        transcriber,
+        media_cache,
         usage,
         whisper_model=settings.whisper_model,
         whisper_paid=settings.groq_paid_tier,
@@ -128,18 +214,8 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
 
     scheduler = ReminderScheduler(reminders, fire)
     tool_registry = AgentTools(bot, reminders, scheduler, chat_log, media, tz=settings.tz).registry()
-    builder = ContentBuilder(media, settings.tz)
-
-    def claude(spec: ModelSpec) -> ClaudeRunner:
-        return ClaudeRunner(
-            anthropic,
-            spec,
-            builder=builder,
-            registry=tool_registry,
-            web_max_uses=settings.web_search_max_uses,
-        )
-
-    runners = ProviderRegistry(available_models(settings), settings.default_model, {"anthropic": claude})
+    runners = build_runners(settings, stack, anthropic, media, media_cache, tool_registry)
+    log.info("models: %s (default %s)", ", ".join(spec.key for spec in runners.models), runners.default_model)
     turns = TurnService(
         runners,
         conversations,
