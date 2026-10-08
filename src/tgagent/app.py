@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from contextlib import AsyncExitStack
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -89,18 +90,26 @@ async def purge_chat_log(chat_log: ChatLogRepo, days: int) -> None:
         await asyncio.sleep(6 * 3600)
 
 
-async def main() -> None:
-    settings = Settings()
-    logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+async def _stop(tasks: list[asyncio.Task[None]]) -> None:
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
 
+
+async def serve(settings: Settings, stack: AsyncExitStack) -> None:
     engine = create_engine(settings.database_url)
+    stack.push_async_callback(engine.dispose)
     sessions = create_sessionmaker(engine)
     users, chats, chat_log = UserRepo(sessions), ChatRepo(sessions), ChatLogRepo(sessions)
     conversations, usage, reminders = ConversationRepo(sessions), UsageRepo(sessions), ReminderRepo(sessions)
 
     bot = Bot(token=settings.telegram_bot_token.get_secret_value())
+    stack.push_async_callback(bot.session.close)
     anthropic = AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value(), max_retries=3)
+    stack.push_async_callback(anthropic.close)
     groq = AsyncGroq(api_key=settings.groq_api_key.get_secret_value(), max_retries=2)
+    stack.push_async_callback(groq.close)
+
     me = await bot.get_me()
     log.info(
         "starting @%s (topics=%s, reads all group messages=%s)",
@@ -166,16 +175,15 @@ async def main() -> None:
         asyncio.create_task(heartbeat(settings.heartbeat_path)),
         asyncio.create_task(purge_chat_log(chat_log, settings.chat_log_retention_days)),
     ]
-    try:
-        await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
-    finally:
-        for task in background:
-            task.cancel()
-        await asyncio.gather(*background, return_exceptions=True)
-        await bot.session.close()
-        await anthropic.close()
-        await groq.close()
-        await engine.dispose()
+    stack.push_async_callback(_stop, background)
+    await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
+
+
+async def main() -> None:
+    settings = Settings()
+    logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    async with AsyncExitStack() as stack:
+        await serve(settings, stack)
 
 
 def run() -> None:
