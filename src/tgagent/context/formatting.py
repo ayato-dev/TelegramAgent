@@ -19,7 +19,7 @@ _MEDIA_NAMES = {
 
 
 def format_time(moment: datetime, tz: ZoneInfo) -> str:
-    return moment.astimezone(tz).strftime("%Y-%m-%d %H:%M")
+    return moment.astimezone(tz).isoformat(timespec="minutes")
 
 
 def _duration(seconds: int) -> str:

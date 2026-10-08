@@ -26,13 +26,13 @@ def test_message_with_author_and_local_time() -> None:
 
     assert (
         rendered
-        == '<message id="7" author="Иван &quot;Ваня&quot;" time="2026-10-08 15:00">\nпривет\n</message>'
+        == '<message id="7" author="Иван &quot;Ваня&quot;" time="2026-10-08T15:00+03:00">\nпривет\n</message>'
     )
 
 
 def test_message_without_author() -> None:
     assert render_message(msg(), MSK, include_author=False) == (
-        '<message id="7" time="2026-10-08 15:00">\nпривет\n</message>'
+        '<message id="7" time="2026-10-08T15:00+03:00">\nпривет\n</message>'
     )
 
 
