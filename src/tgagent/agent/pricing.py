@@ -1,9 +1,13 @@
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from anthropic.types.beta import BetaUsage
+
+if TYPE_CHECKING:
+    from tgagent.agent.models import ModelSpec
 
 MTOK = Decimal(1_000_000)
 
@@ -68,6 +72,11 @@ class TurnUsage:
 
     iterations: list[IterationUsage] = field(default_factory=list)
     web_search_requests: int = 0
+    # Billed tools priced per use rather than per token, e.g. OpenAI code containers.
+    tool_cost: Decimal = Decimal(0)
+
+    def add_iteration(self, input_tokens: int, output_tokens: int, cache_read: int, cache_write: int) -> None:
+        self.iterations.append(IterationUsage(input_tokens, output_tokens, cache_read, cache_write))
 
     def add(self, usage: BetaUsage) -> None:
         parts: Sequence[Any] = usage.iterations or [usage]
@@ -100,8 +109,7 @@ class TurnUsage:
         return sum(it.cache_write_tokens for it in self.iterations)
 
 
-def claude_cost(model: str, usage: TurnUsage) -> Decimal:
-    pricing = PRICING.get(model, HAIKU_5_5)
+def _token_cost(pricing: ModelPricing, usage: TurnUsage) -> Decimal:
     total = Decimal(0)
     for it in usage.iterations:
         card = pricing.card(it.prompt_tokens)
@@ -111,7 +119,27 @@ def claude_cost(model: str, usage: TurnUsage) -> Decimal:
             + it.cache_read_tokens * card.cache_read
             + it.cache_write_tokens * card.cache_write
         ) / MTOK
-    return total + usage.web_search_requests * WEB_SEARCH_PRICE
+    return total
+
+
+def claude_cost(model: str, usage: TurnUsage) -> Decimal:
+    return _token_cost(PRICING.get(model, HAIKU_5_5), usage) + usage.web_search_requests * WEB_SEARCH_PRICE
+
+
+def deepseek_peak(now: datetime) -> bool:
+    """DeepSeek full-price hours: weekdays 01:00-04:00 and 06:00-10:00 UTC."""
+    now = now.astimezone(UTC)
+    return now.weekday() < 5 and (1 <= now.hour < 4 or 6 <= now.hour < 10)
+
+
+def turn_cost(spec: "ModelSpec", usage: TurnUsage, now: datetime | None = None) -> Decimal:
+    """USD for one turn; free plans and models without a known price cost nothing."""
+    if spec.free or spec.pricing is None:
+        return Decimal(0)
+    tokens = _token_cost(spec.pricing, usage)
+    if spec.off_peak and not deepseek_peak(now or datetime.now(UTC)):
+        tokens /= 2
+    return tokens + usage.web_search_requests * spec.search_price + usage.tool_cost
 
 
 def whisper_cost(seconds: float, model: str = "whisper-large-v3") -> Decimal:

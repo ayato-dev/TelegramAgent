@@ -9,6 +9,7 @@ from aiogram import Bot
 from anthropic import AsyncAnthropic
 from groq import AsyncGroq
 
+from tgagent.agent.models import parse_key
 from tgagent.agent.runner import AgentRunner
 from tgagent.config import Settings
 from tgagent.context.builder import ContentBuilder
@@ -105,9 +106,15 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
 
     bot = Bot(token=settings.telegram_bot_token.get_secret_value())
     stack.push_async_callback(bot.session.close)
-    anthropic = AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value(), max_retries=3)
+    provider, model = parse_key(settings.default_model)
+    anthropic_key, groq_key = settings.api_key("anthropic"), settings.api_key("groq")
+    if provider != "anthropic" or anthropic_key is None or groq_key is None:
+        raise RuntimeError(
+            "this build runs Anthropic models only and needs ANTHROPIC_API_KEY and GROQ_API_KEY"
+        )
+    anthropic = AsyncAnthropic(api_key=anthropic_key.get_secret_value(), max_retries=3)
     stack.push_async_callback(anthropic.close)
-    groq = AsyncGroq(api_key=settings.groq_api_key.get_secret_value(), max_retries=2)
+    groq = AsyncGroq(api_key=groq_key.get_secret_value(), max_retries=2)
     stack.push_async_callback(groq.close)
 
     me = await bot.get_me()
@@ -135,11 +142,11 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
     tools = AgentTools(bot, reminders, scheduler, chat_log, media, tz=settings.tz)
     runner = AgentRunner(
         anthropic,
-        model=settings.anthropic_model,
+        model=model,
         max_tokens=settings.max_output_tokens,
         compaction_trigger=settings.compaction_trigger_tokens,
         registry=tools.registry(),
-        web_supported=await web_search_supported(anthropic, settings.anthropic_model),
+        web_supported=await web_search_supported(anthropic, model),
         web_max_uses=settings.web_search_max_uses,
     )
     turns = TurnService(
@@ -150,7 +157,7 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
         chat_log,
         tz=settings.tz,
         bot_name=me.first_name,
-        on_title=TopicTitler(anthropic, bot, conversations, usage, settings.anthropic_model),
+        on_title=TopicTitler(anthropic, bot, conversations, usage, model),
     )
     delivery = ReminderDelivery(bot, turns, chats, users, default_effort=settings.default_effort)
 

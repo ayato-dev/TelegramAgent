@@ -51,7 +51,7 @@ def test_compaction_trigger_below_api_minimum_rejected(env: pytest.MonkeyPatch) 
 def test_defaults_match_design(env: pytest.MonkeyPatch) -> None:
     settings = make()
 
-    assert settings.anthropic_model == "claude-haiku-5-5"
+    assert settings.default_model == "anthropic:claude-haiku-5-5"
     assert settings.compaction_trigger_tokens == 100_000
     assert settings.default_effort == "medium"
     assert settings.whisper_model == "whisper-large-v3"
