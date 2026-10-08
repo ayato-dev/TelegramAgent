@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from tgagent.storage.db import SessionFactory, create_engine, create_sessionmaker
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 TABLES = (
     "usage_events, reminders, media_cache, node_messages, nodes, conversations, chat_messages, chats, users"
 )

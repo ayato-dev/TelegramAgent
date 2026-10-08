@@ -76,3 +76,7 @@ class FakeBot:
 
     async def answer_guest_query(self, guest_query_id: str, result: Any) -> None:
         self._record("answer_guest_query", {"guest_query_id": guest_query_id, "result": result})
+
+    async def send_poll(self, chat_id: int, question: str, options: list[Any], **kw: Any) -> Message:
+        self._record("send_poll", {"chat_id": chat_id, "question": question, "options": options, **kw})
+        return self._message(chat_id)
