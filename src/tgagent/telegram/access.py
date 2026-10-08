@@ -38,7 +38,9 @@ class AccessPolicy:
 
     def message_allowed(self, message: Message) -> bool:
         if message.chat.type == "private":
-            return self.user_allowed(message.from_user.id if message.from_user else None)
+            # The private chat id is its owner; service messages there (e.g. "topic renamed"
+            # after the bot names a topic) are authored by the bot itself.
+            return self.user_allowed(message.chat.id)
         if message.chat.type not in GROUP_TYPES:
             return False
         if self.chat_allowed(message.chat.id):
@@ -102,7 +104,7 @@ class AccessMiddleware(BaseMiddleware):
             await bot.answer_callback_query(callback_query_id=query.id, text=text[:200])
             return
         if (guest := update.guest_message) and guest.guest_query_id and guest.from_user:
-            if self._cooled_down(guest.from_user.id):
+            if not guest.from_user.is_bot and self._cooled_down(guest.from_user.id):
                 content = InputTextMessageContent(message_text=text)
                 await bot.answer_guest_query(
                     guest_query_id=guest.guest_query_id,
@@ -116,6 +118,7 @@ class AccessMiddleware(BaseMiddleware):
             message
             and message.chat.type == "private"
             and message.from_user
+            and not message.from_user.is_bot
             and self._cooled_down(message.from_user.id)
         ):
             await bot.send_message(chat_id=message.chat.id, text=text)

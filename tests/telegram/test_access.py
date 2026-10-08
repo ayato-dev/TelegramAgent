@@ -183,3 +183,40 @@ async def test_empty_denial_text_keeps_silence() -> None:
     )
 
     assert bot.calls == []
+
+
+async def test_bot_service_message_in_allowed_private_chat_is_not_denied() -> None:
+    from aiogram.types import ForumTopicEdited
+
+    from tests.telegram.fakes import FakeBot
+
+    bot_user = User(id=999, is_bot=True, first_name="Agent")
+    renamed = Message(
+        message_id=7,
+        date=NOW,
+        chat=PRIVATE_OWNER,
+        from_user=bot_user,
+        message_thread_id=3,
+        forum_topic_edited=ForumTopicEdited(name="Рецепт борща"),
+    )
+    bot, handler = FakeBot(), Recorder()
+
+    await denying(Clock())(handler, Update(update_id=1, message=renamed), {"bot": bot.as_bot()})
+
+    assert handler.called
+    assert bot.calls == []
+
+
+async def test_bots_never_get_denial_replies() -> None:
+    from tests.telegram.fakes import FakeBot
+
+    other_bot = User(id=777, is_bot=True, first_name="Other")
+    bot = FakeBot()
+
+    await denying(Clock())(
+        Recorder(),
+        Update(update_id=1, message=msg(Chat(id=777, type="private"), other_bot)),
+        {"bot": bot.as_bot()},
+    )
+
+    assert bot.calls == []
