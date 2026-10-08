@@ -45,8 +45,11 @@ def server_tool_specs(
 ) -> list[dict[str, Any]]:
     specs: list[dict[str, Any]] = []
     if options.web and web_supported:
-        specs.append({"type": WEB_SEARCH, "name": "web_search", "max_uses": web_max_uses})
-        specs.append({"type": WEB_FETCH, "name": "web_fetch", "max_uses": web_max_uses})
+        # Direct calls only: with programmatic calling enabled Haiku sometimes sends
+        # {"params": {...}} on a direct call, which the API rejects as invalid_tool_input.
+        direct = {"max_uses": web_max_uses, "allowed_callers": ["direct"]}
+        specs.append({"type": WEB_SEARCH, "name": "web_search", **direct})
+        specs.append({"type": WEB_FETCH, "name": "web_fetch", **direct})
     if options.code:
         specs.append({"type": CODE_EXECUTION, "name": "code_execution"})
     return specs

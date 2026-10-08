@@ -61,3 +61,10 @@ async def test_registry_turns_exceptions_into_error_results() -> None:
     outcome = await ToolRegistry({"broken": broken}).execute("broken", {}, CTX)
 
     assert outcome == ToolOutcome("Ошибка: bad date", is_error=True)
+
+
+def test_web_tools_are_called_directly_only() -> None:
+    specs = server_tool_specs(AgentOptions(), web_supported=True, web_max_uses=5)
+
+    web = [spec for spec in specs if spec["name"] in ("web_search", "web_fetch")]
+    assert [spec["allowed_callers"] for spec in web] == [["direct"], ["direct"]]
