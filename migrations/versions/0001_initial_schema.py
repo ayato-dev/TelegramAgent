@@ -12,6 +12,11 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
+# Portable between PostgreSQL and SQLite (SQLite auto-increments only INTEGER PRIMARY KEY).
+JSON = sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), "postgresql")
+AUTO_ID = sa.BigInteger().with_variant(sa.Integer(), "sqlite")
+NOW = sa.text("CURRENT_TIMESTAMP")
+
 # revision identifiers, used by Alembic.
 revision: str = "0001"
 down_revision: str | Sequence[str] | None = None
@@ -31,8 +36,8 @@ def upgrade() -> None:
         sa.Column("sender_name", sa.String(length=256), nullable=False),
         sa.Column("date", sa.DateTime(timezone=True), nullable=False),
         sa.Column("text", sa.Text(), nullable=True),
-        sa.Column("media", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        sa.Column("checklist", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("media", JSON, nullable=True),
+        sa.Column("checklist", JSON, nullable=True),
         sa.Column("reply_to_message_id", sa.BigInteger(), nullable=True),
         sa.Column("quote", sa.Text(), nullable=True),
         sa.Column("forwarded_from", sa.String(length=256), nullable=True),
@@ -49,16 +54,16 @@ def upgrade() -> None:
         sa.Column("added_by", sa.BigInteger(), nullable=True),
         sa.Column(
             "settings",
-            postgresql.JSONB(astext_type=sa.Text()),
-            server_default=sa.text("'{}'::jsonb"),
+            JSON,
+            server_default=sa.text("'{}'"),
             nullable=False,
         ),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=NOW, nullable=False),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_chats")),
     )
     op.create_table(
         "conversations",
-        sa.Column("id", sa.BigInteger(), nullable=False),
+        sa.Column("id", AUTO_ID, nullable=False),
         sa.Column("chat_id", sa.BigInteger(), nullable=False),
         sa.Column("thread_id", sa.BigInteger(), nullable=True),
         sa.Column("kind", sa.String(length=16), nullable=False),
@@ -67,7 +72,7 @@ def upgrade() -> None:
         sa.Column("title_pending", sa.Boolean(), server_default=sa.text("false"), nullable=False),
         sa.Column("container_id", sa.String(length=128), nullable=True),
         sa.Column("container_expires_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=NOW, nullable=False),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_conversations")),
     )
     op.create_index(
@@ -76,18 +81,19 @@ def upgrade() -> None:
         ["chat_id", "thread_id"],
         unique=False,
         postgresql_where=sa.text("is_active"),
+        sqlite_where=sa.text("is_active"),
     )
     op.create_table(
         "media_cache",
         sa.Column("file_unique_id", sa.String(length=128), nullable=False),
         sa.Column("anthropic_file_id", sa.String(length=128), nullable=True),
         sa.Column("transcript", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=NOW, nullable=False),
         sa.PrimaryKeyConstraint("file_unique_id", name=op.f("pk_media_cache")),
     )
     op.create_table(
         "reminders",
-        sa.Column("id", sa.BigInteger(), nullable=False),
+        sa.Column("id", AUTO_ID, nullable=False),
         sa.Column("chat_id", sa.BigInteger(), nullable=False),
         sa.Column("thread_id", sa.BigInteger(), nullable=True),
         sa.Column("user_id", sa.BigInteger(), nullable=False),
@@ -95,14 +101,14 @@ def upgrade() -> None:
         sa.Column("text", sa.Text(), nullable=False),
         sa.Column("mode", sa.String(length=16), nullable=False),
         sa.Column("status", sa.String(length=16), server_default=sa.text("'pending'"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=NOW, nullable=False),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_reminders")),
     )
     op.create_index(op.f("ix_reminders_status_due_at"), "reminders", ["status", "due_at"], unique=False)
     op.create_table(
         "usage_events",
-        sa.Column("id", sa.BigInteger(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("id", AUTO_ID, nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=NOW, nullable=False),
         sa.Column("user_id", sa.BigInteger(), nullable=True),
         sa.Column("chat_id", sa.BigInteger(), nullable=True),
         sa.Column("kind", sa.String(length=16), nullable=False),
@@ -123,19 +129,19 @@ def upgrade() -> None:
         sa.Column("first_name", sa.String(length=256), nullable=False),
         sa.Column("username", sa.String(length=64), nullable=True),
         sa.Column("language_code", sa.String(length=16), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=NOW, nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=NOW, nullable=False),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_users")),
     )
     op.create_table(
         "nodes",
-        sa.Column("id", sa.BigInteger(), nullable=False),
+        sa.Column("id", AUTO_ID, nullable=False),
         sa.Column("conversation_id", sa.BigInteger(), nullable=False),
         sa.Column("parent_id", sa.BigInteger(), nullable=True),
         sa.Column("role", sa.String(length=16), nullable=False),
-        sa.Column("content", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("content", JSON, nullable=False),
         sa.Column("has_compaction", sa.Boolean(), server_default=sa.text("false"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=NOW, nullable=False),
         sa.ForeignKeyConstraint(
             ["conversation_id"],
             ["conversations.id"],
@@ -178,7 +184,10 @@ def downgrade() -> None:
     op.drop_table("reminders")
     op.drop_table("media_cache")
     op.drop_index(
-        "ix_conversations_active", table_name="conversations", postgresql_where=sa.text("is_active")
+        "ix_conversations_active",
+        table_name="conversations",
+        postgresql_where=sa.text("is_active"),
+        sqlite_where=sa.text("is_active"),
     )
     op.drop_table("conversations")
     op.drop_table("chats")

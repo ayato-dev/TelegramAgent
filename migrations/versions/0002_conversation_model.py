@@ -29,6 +29,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("media_cache", "openai_file_id")
-    op.drop_column("conversations", "last_prompt_tokens")
-    op.drop_column("conversations", "model")
+    # Batch mode: SQLite rebuilds the table to drop columns.
+    with op.batch_alter_table("media_cache") as batch:
+        batch.drop_column("openai_file_id")
+    with op.batch_alter_table("conversations") as batch:
+        batch.drop_column("last_prompt_tokens")
+        batch.drop_column("model")

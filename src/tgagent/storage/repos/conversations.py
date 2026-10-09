@@ -4,9 +4,8 @@ from datetime import datetime
 from typing import Any, Literal
 
 from sqlalchemy import literal, select, update
-from sqlalchemy.dialects.postgresql import insert
 
-from tgagent.storage.db import SessionFactory
+from tgagent.storage.db import SessionFactory, insert
 from tgagent.storage.models import Conversation, Node, NodeMessage
 
 Role = Literal["user", "assistant"]
@@ -200,13 +199,12 @@ class ConversationRepo:
     async def map_messages(self, chat_id: int, message_ids: Sequence[int], node_id: int) -> None:
         if not message_ids:
             return
-        stmt = insert(NodeMessage).values(
-            [{"chat_id": chat_id, "message_id": mid, "node_id": node_id} for mid in message_ids]
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=[NodeMessage.chat_id, NodeMessage.message_id], set_={"node_id": node_id}
-        )
+        rows = [{"chat_id": chat_id, "message_id": mid, "node_id": node_id} for mid in message_ids]
         async with self._sessions.begin() as session:
+            stmt = insert(session, NodeMessage).values(rows)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[NodeMessage.chat_id, NodeMessage.message_id], set_={"node_id": node_id}
+            )
             await session.execute(stmt)
 
     async def node_for_message(self, chat_id: int, message_id: int) -> NodeRecord | None:

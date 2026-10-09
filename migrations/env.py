@@ -7,6 +7,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from tgagent.storage.db import DEFAULT_DATABASE_URL, prepare_sqlite_path
 from tgagent.storage.models import Base
 
 config = context.config
@@ -17,7 +18,9 @@ target_metadata = Base.metadata
 
 
 def database_url() -> str:
-    return config.get_main_option("sqlalchemy.url") or os.environ["DATABASE_URL"]
+    url = config.get_main_option("sqlalchemy.url") or os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
+    prepare_sqlite_path(url)
+    return url
 
 
 def run_migrations_offline() -> None:
@@ -32,7 +35,12 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    # SQLite can't ALTER most things in place; batch mode rebuilds tables instead.
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        render_as_batch=connection.dialect.name == "sqlite",
+    )
     with context.begin_transaction():
         context.run_migrations()
 

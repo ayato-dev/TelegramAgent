@@ -7,6 +7,7 @@ from pydantic import Field, SecretStr, ValidationInfo, field_validator, model_va
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from tgagent.agent.models import FALLBACK_MODELS, PROVIDERS, Provider, parse_key
+from tgagent.storage.db import DEFAULT_DATABASE_URL
 
 Effort = Literal["low", "medium", "high"]
 
@@ -15,7 +16,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", frozen=True)
 
     telegram_bot_token: SecretStr
-    database_url: str
+    # Defaults to a SQLite file; set postgresql+asyncpg://... for Postgres (e.g. Neon, compose.yaml).
+    database_url: str = DEFAULT_DATABASE_URL
 
     # Any subset of providers; at least one key is required.
     anthropic_api_key: SecretStr | None = None

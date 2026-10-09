@@ -1,9 +1,8 @@
 from typing import Any
 
 from sqlalchemy import select, update
-from sqlalchemy.dialects.postgresql import insert
 
-from tgagent.storage.db import SessionFactory
+from tgagent.storage.db import SessionFactory, insert
 from tgagent.storage.models import Chat, User
 
 
@@ -15,10 +14,9 @@ class UserRepo:
         self, user_id: int, first_name: str, username: str | None, language_code: str | None
     ) -> None:
         values = {"first_name": first_name, "username": username, "language_code": language_code}
-        stmt = insert(User).values(id=user_id, **values)
-        stmt = stmt.on_conflict_do_update(index_elements=[User.id], set_=values)
         async with self._sessions.begin() as session:
-            await session.execute(stmt)
+            stmt = insert(session, User).values(id=user_id, **values)
+            await session.execute(stmt.on_conflict_do_update(index_elements=[User.id], set_=values))
 
     async def names(self, user_ids: list[int]) -> dict[int, str]:
         if not user_ids:
@@ -35,9 +33,11 @@ class ChatRepo:
         self._sessions = sessions
 
     async def upsert(self, chat_id: int, chat_type: str, title: str | None) -> None:
-        stmt = insert(Chat).values(id=chat_id, type=chat_type, title=title)
-        stmt = stmt.on_conflict_do_update(index_elements=[Chat.id], set_={"type": chat_type, "title": title})
         async with self._sessions.begin() as session:
+            stmt = insert(session, Chat).values(id=chat_id, type=chat_type, title=title)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[Chat.id], set_={"type": chat_type, "title": title}
+            )
             await session.execute(stmt)
 
     async def set_allowed(self, chat_id: int, allowed: bool, added_by: int | None) -> None:
@@ -58,20 +58,18 @@ class ChatRepo:
 
     async def update_settings(self, chat_id: int, patch: dict[str, Any]) -> dict[str, Any]:
         async with self._sessions.begin() as session:
-            merged = await session.scalar(
-                update(Chat)
-                .where(Chat.id == chat_id)
-                .values(settings=Chat.settings.op("||")(patch))
-                .returning(Chat.settings)
-            )
-        return dict(merged or {})
+            chat = await session.get(Chat, chat_id, with_for_update=True)
+            if chat is None:
+                return {}
+            chat.settings = {**chat.settings, **patch}
+            return dict(chat.settings)
 
     async def migrate(self, old_id: int, new_id: int) -> None:
         async with self._sessions.begin() as session:
             old = await session.get(Chat, old_id)
             if old is None:
                 return
-            stmt = insert(Chat).values(
+            stmt = insert(session, Chat).values(
                 id=new_id,
                 type="supergroup",
                 title=old.title,

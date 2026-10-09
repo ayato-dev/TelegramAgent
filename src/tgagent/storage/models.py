@@ -1,11 +1,13 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     DateTime,
+    Dialect,
     Float,
     ForeignKey,
     Index,
@@ -14,11 +16,36 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    TypeDecorator,
     func,
 )
 from sqlalchemy import text as sql
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+# The schema runs on PostgreSQL and SQLite.
+JsonValue = JSON().with_variant(JSONB(), "postgresql")
+# SQLite auto-increments only INTEGER PRIMARY KEY columns.
+AutoId = BigInteger().with_variant(Integer(), "sqlite")
+
+
+class UtcDateTime(TypeDecorator[datetime]):
+    """Aware datetimes on every backend; SQLite keeps no offset, so values are stored in UTC."""
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        if value is None:
+            return None
+        value = value.astimezone(UTC)
+        return value.replace(tzinfo=None) if dialect.name == "sqlite" else value
+
+    def process_result_value(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value
+
 
 NAMING = {
     "ix": "ix_%(table_name)s_%(column_0_N_name)s",
@@ -33,7 +60,7 @@ class Base(DeclarativeBase):
 
 
 def created_at() -> Mapped[datetime]:
-    return mapped_column(DateTime(timezone=True), server_default=func.now())
+    return mapped_column(UtcDateTime(), server_default=func.now())
 
 
 class User(Base):
@@ -45,7 +72,7 @@ class User(Base):
     language_code: Mapped[str | None] = mapped_column(String(16))
     created_at: Mapped[datetime] = created_at()
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+        UtcDateTime(), server_default=func.now(), onupdate=func.now()
     )
 
 
@@ -57,7 +84,7 @@ class Chat(Base):
     title: Mapped[str | None] = mapped_column(String(256))
     allowed: Mapped[bool] = mapped_column(Boolean, server_default=sql("false"))
     added_by: Mapped[int | None] = mapped_column(BigInteger)
-    settings: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=sql("'{}'::jsonb"))
+    settings: Mapped[dict[str, Any]] = mapped_column(JsonValue, server_default=sql("'{}'"))
     created_at: Mapped[datetime] = created_at()
 
 
@@ -70,10 +97,10 @@ class ChatMessage(Base):
     thread_id: Mapped[int | None] = mapped_column(BigInteger)
     sender_id: Mapped[int | None] = mapped_column(BigInteger)
     sender_name: Mapped[str] = mapped_column(String(256))
-    date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    date: Mapped[datetime] = mapped_column(UtcDateTime())
     text: Mapped[str | None] = mapped_column(Text)
-    media: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    checklist: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    media: Mapped[dict[str, Any] | None] = mapped_column(JsonValue)
+    checklist: Mapped[dict[str, Any] | None] = mapped_column(JsonValue)
     reply_to_message_id: Mapped[int | None] = mapped_column(BigInteger)
     quote: Mapped[str | None] = mapped_column(Text)
     forwarded_from: Mapped[str | None] = mapped_column(String(256))
@@ -88,10 +115,11 @@ class Conversation(Base):
             "chat_id",
             "thread_id",
             postgresql_where=sql("is_active"),
+            sqlite_where=sql("is_active"),
         ),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(AutoId, primary_key=True)
     chat_id: Mapped[int] = mapped_column(BigInteger)
     thread_id: Mapped[int | None] = mapped_column(BigInteger)
     kind: Mapped[str] = mapped_column(String(16))
@@ -99,7 +127,7 @@ class Conversation(Base):
     head_node_id: Mapped[int | None] = mapped_column(BigInteger)
     title_pending: Mapped[bool] = mapped_column(Boolean, server_default=sql("false"))
     container_id: Mapped[str | None] = mapped_column(String(128))
-    container_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    container_expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
     # provider:model-id the history is written for; None until the first turn picks one.
     model: Mapped[str | None] = mapped_column(String(96))
     # Prompt size of the latest request, used to decide on client-side compaction.
@@ -110,13 +138,15 @@ class Conversation(Base):
 class Node(Base):
     __tablename__ = "nodes"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(AutoId, primary_key=True)
     conversation_id: Mapped[int] = mapped_column(
-        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+        BigInteger, ForeignKey("conversations.id", ondelete="CASCADE"), index=True
     )
-    parent_id: Mapped[int | None] = mapped_column(ForeignKey("nodes.id", ondelete="CASCADE"), index=True)
+    parent_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("nodes.id", ondelete="CASCADE"), index=True
+    )
     role: Mapped[str] = mapped_column(String(16))
-    content: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    content: Mapped[list[dict[str, Any]]] = mapped_column(JsonValue)
     has_compaction: Mapped[bool] = mapped_column(Boolean, server_default=sql("false"))
     created_at: Mapped[datetime] = created_at()
 
@@ -126,7 +156,7 @@ class NodeMessage(Base):
 
     chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id", ondelete="CASCADE"), index=True)
+    node_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("nodes.id", ondelete="CASCADE"), index=True)
 
 
 class MediaCache(Base):
@@ -143,11 +173,11 @@ class Reminder(Base):
     __tablename__ = "reminders"
     __table_args__ = (Index(None, "status", "due_at"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(AutoId, primary_key=True)
     chat_id: Mapped[int] = mapped_column(BigInteger)
     thread_id: Mapped[int | None] = mapped_column(BigInteger)
     user_id: Mapped[int] = mapped_column(BigInteger)
-    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    due_at: Mapped[datetime] = mapped_column(UtcDateTime())
     text: Mapped[str] = mapped_column(Text)
     mode: Mapped[str] = mapped_column(String(16))
     status: Mapped[str] = mapped_column(String(16), server_default=sql("'pending'"))
@@ -157,10 +187,8 @@ class Reminder(Base):
 class UsageEvent(Base):
     __tablename__ = "usage_events"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), index=True
-    )
+    id: Mapped[int] = mapped_column(AutoId, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), server_default=func.now(), index=True)
     user_id: Mapped[int | None] = mapped_column(BigInteger)
     chat_id: Mapped[int | None] = mapped_column(BigInteger)
     kind: Mapped[str] = mapped_column(String(16))

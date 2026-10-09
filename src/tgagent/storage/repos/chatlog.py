@@ -1,10 +1,9 @@
 from datetime import datetime
 
 from sqlalchemy import delete, select
-from sqlalchemy.dialects.postgresql import insert
 
 from tgagent.domain import Checklist, MediaRef, NormalizedMessage
-from tgagent.storage.db import SessionFactory
+from tgagent.storage.db import SessionFactory, insert
 from tgagent.storage.models import ChatMessage
 
 
@@ -52,12 +51,12 @@ class ChatLogRepo:
 
     async def add(self, message: NormalizedMessage) -> None:
         row = _to_row(message)
-        stmt = insert(ChatMessage).values(**row)
         keys = {k: v for k, v in row.items() if k not in ("chat_id", "message_id")}
-        stmt = stmt.on_conflict_do_update(
-            index_elements=[ChatMessage.chat_id, ChatMessage.message_id], set_=keys
-        )
         async with self._sessions.begin() as session:
+            stmt = insert(session, ChatMessage).values(**row)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[ChatMessage.chat_id, ChatMessage.message_id], set_=keys
+            )
             await session.execute(stmt)
 
     async def get(self, chat_id: int, message_id: int) -> NormalizedMessage | None:

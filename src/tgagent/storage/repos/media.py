@@ -1,8 +1,6 @@
 from dataclasses import dataclass
 
-from sqlalchemy.dialects.postgresql import insert
-
-from tgagent.storage.db import SessionFactory
+from tgagent.storage.db import SessionFactory, insert
 from tgagent.storage.models import MediaCache
 
 
@@ -34,7 +32,7 @@ class MediaRepo:
         await self._upsert(file_unique_id, transcript=transcript)
 
     async def _upsert(self, file_unique_id: str, **values: str) -> None:
-        stmt = insert(MediaCache).values(file_unique_id=file_unique_id, **values)
-        stmt = stmt.on_conflict_do_update(index_elements=[MediaCache.file_unique_id], set_=values)
         async with self._sessions.begin() as session:
+            stmt = insert(session, MediaCache).values(file_unique_id=file_unique_id, **values)
+            stmt = stmt.on_conflict_do_update(index_elements=[MediaCache.file_unique_id], set_=values)
             await session.execute(stmt)

@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -266,3 +267,17 @@ async def test_usage_totals_filter_by_chat(sessions: SessionFactory) -> None:
         (1, Decimal("0.5")),
         (2, Decimal("0.25")),
     ]
+
+
+async def test_times_come_back_aware_and_compare_correctly(sessions: SessionFactory) -> None:
+    repo = ReminderRepo(sessions)
+    moscow = datetime(2026, 10, 9, 15, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    await repo.create(1, None, 1, moscow, "x", "notify")
+
+    due = await repo.next_due()
+    early = await repo.claim_due(moscow - timedelta(seconds=1))
+    claimed = await repo.claim_due(moscow)
+
+    assert due == moscow and due is not None and due.tzinfo is not None
+    assert early == []
+    assert [r.due_at for r in claimed] == [moscow]
