@@ -35,9 +35,11 @@ class ReminderScheduler:
     def wake(self) -> None:
         self._wake.set()
 
-    async def tick(self) -> None:
+    async def tick(self) -> int:
+        """Fire everything due now; returns how many reminders fired."""
         due = await self._repo.claim_due(self._clock())
         await asyncio.gather(*(self._run_one(item) for item in due))
+        return len(due)
 
     async def _run_one(self, item: ReminderRecord) -> None:
         try:

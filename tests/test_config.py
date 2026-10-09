@@ -68,3 +68,23 @@ def test_timezone_resolved_to_zoneinfo(env: pytest.MonkeyPatch) -> None:
     env.setenv("TIMEZONE", "Europe/Moscow")
 
     assert make().tz.key == "Europe/Moscow"
+
+
+def test_webhook_mode_is_off_by_default_and_needs_https(env: pytest.MonkeyPatch) -> None:
+    assert make().webhook_url is None
+    assert make().port == 8080
+
+    env.setenv("WEBHOOK_URL", "http://bot.example.com")
+    with pytest.raises(ValidationError):
+        make()
+
+    env.setenv("WEBHOOK_URL", "https://bot.example.com")
+    env.setenv("PORT", "9000")
+    settings = make()
+    assert (settings.webhook_url, settings.port) == ("https://bot.example.com", 9000)
+
+
+def test_database_defaults_to_a_sqlite_file(env: pytest.MonkeyPatch) -> None:
+    env.delenv("DATABASE_URL")
+
+    assert make().database_url.startswith("sqlite+aiosqlite:///")

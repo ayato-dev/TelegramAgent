@@ -46,6 +46,16 @@ class Settings(BaseSettings):
     # Google Search grounding needs a paid Gemini plan; free-tier usage is not counted in /usage.
     gemini_paid_tier: bool = False
 
+    # Webhook mode: set the bot's public HTTPS address and Telegram posts updates to <url>/webhook.
+    # Without it the bot uses long polling and needs no public address.
+    webhook_url: str | None = None
+    webhook_secret: SecretStr | None = None
+    port: int = 8080
+    # Handle each update inside its HTTP request, for hosts that stop the CPU after responding.
+    webhook_inline: bool = False
+    # How often reminders are checked between wake-ups; raise it for databases that sleep (Neon).
+    reminder_poll_seconds: float = Field(60, ge=10)
+
     timezone: str = "Europe/Moscow"
     chat_log_retention_days: int = Field(30, ge=1)
     heartbeat_path: Path = Path("/tmp/tgagent-heartbeat")
@@ -74,6 +84,15 @@ class Settings(BaseSettings):
             if info.data.get(f"{provider}_api_key") is not None:
                 return f"{provider}:{FALLBACK_MODELS[provider]}"
         return ""
+
+    @field_validator("webhook_url")
+    @classmethod
+    def _https_webhook(cls, value: str | None) -> str | None:
+        if not value:
+            return None
+        if not value.startswith("https://"):
+            raise ValueError("WEBHOOK_URL must be an https:// address: Telegram only posts to HTTPS")
+        return value
 
     @field_validator("timezone")
     @classmethod

@@ -40,9 +40,9 @@ async def test_due_reminders_fire_and_finish() -> None:
         raise RuntimeError("boom")
 
     scheduler = ReminderScheduler(cast(ReminderRepo, repo), fire, clock=lambda: NOW)
-    await scheduler.tick()
+    count = await scheduler.tick()
 
-    assert fired == [1]
+    assert (fired, count) == ([1], 1)
     assert repo.finished == {1: "done"}
 
     repo.items.append(reminder(3, NOW))

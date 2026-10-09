@@ -46,6 +46,7 @@ from tgagent.telegram.bursts import BurstCollector
 from tgagent.telegram.deps import Deps
 from tgagent.telegram.dispatcher import build_dispatcher, setup_commands
 from tgagent.telegram.reminder_delivery import ReminderDelivery
+from tgagent.telegram.webhook import run_webhook, webhook_secret
 
 log = logging.getLogger("tgagent")
 
@@ -153,12 +154,17 @@ async def heartbeat(path: Path) -> None:
         await asyncio.sleep(30)
 
 
+async def purge_old_chat_log(chat_log: ChatLogRepo, days: int) -> int:
+    removed = await chat_log.purge_older_than(datetime.now(UTC) - timedelta(days=days))
+    if removed:
+        log.info("purged %d old chat log messages", removed)
+    return removed
+
+
 async def purge_chat_log(chat_log: ChatLogRepo, days: int) -> None:
     while True:
         try:
-            removed = await chat_log.purge_older_than(datetime.now(UTC) - timedelta(days=days))
-            if removed:
-                log.info("purged %d old chat log messages", removed)
+            await purge_old_chat_log(chat_log, days)
         except Exception:
             log.exception("chat log purge failed")
         await asyncio.sleep(6 * 3600)
@@ -212,7 +218,7 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
     async def fire(item: ReminderRecord) -> None:
         await delivery(item)
 
-    scheduler = ReminderScheduler(reminders, fire)
+    scheduler = ReminderScheduler(reminders, fire, poll_interval=settings.reminder_poll_seconds)
     tool_registry = AgentTools(bot, reminders, scheduler, chat_log, media, tz=settings.tz).registry()
     runners = build_runners(settings, stack, anthropic, media, media_cache, tool_registry)
     log.info("models: %s (default %s)", ", ".join(spec.key for spec in runners.models), runners.default_model)
@@ -258,6 +264,27 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
         asyncio.create_task(purge_chat_log(chat_log, settings.chat_log_retention_days)),
     ]
     stack.push_async_callback(_stop, background)
+    if settings.webhook_url:
+
+        async def cron() -> dict[str, int]:
+            fired = await scheduler.tick()
+            purged = await purge_old_chat_log(chat_log, settings.chat_log_retention_days)
+            return {"reminders": fired, "purged_messages": purged}
+
+        token = settings.telegram_bot_token.get_secret_value()
+        configured = settings.webhook_secret.get_secret_value() if settings.webhook_secret else None
+        await run_webhook(
+            dispatcher,
+            bot,
+            public_url=settings.webhook_url,
+            secret=webhook_secret(token, configured),
+            port=settings.port,
+            inline=settings.webhook_inline,
+            on_cron=cron,
+        )
+        return
+    # A webhook left over from webhook mode would make polling fail.
+    await bot.delete_webhook()
     await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
 
 
