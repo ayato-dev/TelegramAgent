@@ -7,4 +7,3 @@
 .ruff_cache
 .pytest_cache
 tests
-README.md
