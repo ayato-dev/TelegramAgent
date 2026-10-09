@@ -5,6 +5,7 @@ from tgagent.context.normalize import normalize
 from tgagent.domain import NormalizedMessage
 from tgagent.services.turns import TurnRequest
 from tgagent.telegram.access import GROUP_TYPES
+from tgagent.telegram.bursts import pick_trigger
 from tgagent.telegram.deps import Deps
 from tgagent.telegram.handlers.common import SUPPORTED_CONTENT, remember_user
 from tgagent.telegram.sinks import EditSink
@@ -33,12 +34,18 @@ async def on_group_edit(message: Message, deps: Deps) -> None:
 
 @router.message(F.content_type.in_(SUPPORTED_CONTENT))
 async def on_group_message(message: Message, bot: Bot, deps: Deps) -> None:
-    normalized = normalize(message)
-    await deps.chat_log.add(normalized)
+    await deps.chat_log.add(normalize(message))
     user = message.from_user
-    if user is None or user.is_bot or not is_addressed(message, deps.me.id, deps.username):
+    if user is None or user.is_bot:
         return
-    await remember_user(message, deps)
+    # "@bot what about this?" plus the posts forwarded right after it make one request.
+    batch = await deps.bursts.collect(message)
+    picked = pick_trigger(batch or [], lambda m: is_addressed(m, deps.me.id, deps.username))
+    if picked is None:
+        return
+    trigger, rest = picked
+    normalized = normalize(trigger)
+    await remember_user(trigger, deps)
     request = TurnRequest(
         kind="group",
         chat_id=message.chat.id,
@@ -46,9 +53,10 @@ async def on_group_message(message: Message, bot: Bot, deps: Deps) -> None:
         chat_title=message.chat.title,
         user_id=user.id,
         trigger=normalized,
-        reply_context=await reply_context(message, deps),
+        reply_context=await reply_context(trigger, deps),
+        album=tuple(normalize(m) for m in rest),
         options=deps.options(await deps.chats.get_settings(message.chat.id)),
     )
-    sink = EditSink(bot, message.chat.id, normalized.thread_id, reply_to=message.message_id)
+    sink = EditSink(bot, message.chat.id, normalized.thread_id, reply_to=trigger.message_id)
     async with deps.locks.hold(message.chat.id):
         await deps.turns.run(request, sink)

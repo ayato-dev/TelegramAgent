@@ -42,7 +42,7 @@ from tgagent.storage.repos import (
 )
 from tgagent.stt.groq import GroqTranscriber
 from tgagent.telegram.access import AccessPolicy
-from tgagent.telegram.albums import AlbumCollector
+from tgagent.telegram.bursts import BurstCollector
 from tgagent.telegram.deps import Deps
 from tgagent.telegram.dispatcher import build_dispatcher, setup_commands
 from tgagent.telegram.reminder_delivery import ReminderDelivery
@@ -246,7 +246,7 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
         usage_report=UsageReport(usage, users, settings.tz),
         locks=KeyedLocks(),
         generations=GenerationRegistry(),
-        albums=AlbumCollector(),
+        bursts=BurstCollector(),
         models=tuple(runners.models),
     )
     dispatcher = build_dispatcher(deps, bot)

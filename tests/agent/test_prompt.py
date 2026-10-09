@@ -36,3 +36,12 @@ def test_prompt_is_stable_per_model_and_style() -> None:
 
     assert system_prompt(AgentOptions(effort="high", web=False), HAIKU) == normal
     assert troll == normal + "\n" + STYLE_PROMPTS["troll"]
+
+
+def test_posts_are_explained_like_grok_and_questions_answered_as_asked() -> None:
+    prompt = system_prompt(AgentOptions(), HAIKU)
+
+    assert "arrive together in one turn" in prompt
+    assert "answer exactly that question" in prompt
+    assert "the way Grok does on X" in prompt
+    assert "short fact-check" in prompt

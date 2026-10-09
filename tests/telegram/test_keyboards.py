@@ -1,12 +1,9 @@
-import asyncio
 from dataclasses import replace
-from datetime import UTC, datetime
 
-from aiogram.types import Chat, InlineKeyboardMarkup, Message
+from aiogram.types import InlineKeyboardMarkup
 
 from tgagent.agent.models import CATALOG
 from tgagent.agent.tools import AgentOptions
-from tgagent.telegram.albums import AlbumCollector
 from tgagent.telegram.keyboards import (
     SETTINGS_PREFIX,
     model_badges,
@@ -72,31 +69,6 @@ def test_badges_show_capabilities() -> None:
     assert model_badges(OSS) == "🌐🐍🆓"
     assert model_badges(CATALOG["gemini:gemini-3.1-flash-lite"]) == "👁🎙🌐🐍"
     assert "🎨" in model_badges(CATALOG["openai:gpt-6-luna"])
-
-
-def photo_message(message_id: int, group: str | None) -> Message:
-    return Message(
-        message_id=message_id,
-        date=datetime.now(UTC),
-        chat=Chat(id=1, type="private"),
-        media_group_id=group,
-        text="x",
-    )
-
-
-async def test_album_collected_into_one_batch() -> None:
-    collector = AlbumCollector(delay=0.05)
-
-    results = await asyncio.gather(
-        collector.collect(photo_message(1, "g")),
-        collector.collect(photo_message(2, "g")),
-        collector.collect(photo_message(3, None)),
-    )
-
-    batches = [r for r in results if r is not None]
-    assert sorted(len(b) for b in batches) == [1, 2]
-    album = next(b for b in batches if len(b) == 2)
-    assert [m.message_id for m in album] == [1, 2]
 
 
 def test_style_button_shows_current_style() -> None:

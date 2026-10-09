@@ -12,7 +12,7 @@ from tgagent.services.turns import TurnService
 from tgagent.services.usage_report import UsageReport
 from tgagent.storage.repos import ChatLogRepo, ChatRepo, ConversationRepo, UserRepo
 from tgagent.telegram.access import AccessPolicy
-from tgagent.telegram.albums import AlbumCollector
+from tgagent.telegram.bursts import BurstCollector
 
 
 @dataclass(slots=True)
@@ -30,7 +30,7 @@ class Deps:
     usage_report: UsageReport
     locks: KeyedLocks
     generations: GenerationRegistry
-    albums: AlbumCollector
+    bursts: BurstCollector
     # Models the bot can run, the default one included.
     models: tuple[ModelSpec, ...]
 
