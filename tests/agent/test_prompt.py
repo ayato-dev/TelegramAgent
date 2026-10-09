@@ -27,6 +27,14 @@ def test_prompt_is_english_and_keeps_fact_checking_rules() -> None:
     assert "language of the person's message" in prompt
 
 
+def test_prompt_sends_the_model_to_search_when_it_is_unsure() -> None:
+    prompt = system_prompt(AgentOptions(), HAIKU)
+
+    assert "don't know the answer for certain" in prompt
+    assert "costs money" not in prompt
+    assert "not a neighbouring or more general one" in prompt
+
+
 def test_media_notes_follow_the_model() -> None:
     gemini, oss, haiku = (system_prompt(AgentOptions(), spec) for spec in (GEMINI, OSS, HAIKU))
 
