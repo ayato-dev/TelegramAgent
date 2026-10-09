@@ -23,7 +23,6 @@ from tgagent.telegram.render import (
     RICH_LIMIT,
     TEXT_LIMIT,
     compose_draft,
-    edit_markdown,
     entity_chunks,
     reply_parameters,
     send_files,
@@ -182,9 +181,10 @@ class DraftSink:
         await self._bot.send_message(chat_id=self._chat_id, text=text, message_thread_id=self._thread_id)
 
 
-class EditSink:
-    """Groups: Telegram has no drafts here, so the native "typing…" status shows while the bot works
-    and the answer message appears with the first real text, then grows by edits."""
+class TypingSink:
+    """Groups: bots get no streaming drafts here (Bot API allows them in private chats only), so the
+    chat shows the native "typing…" status while the bot works and then one complete reply.
+    Growing a message by edits left stray half-answers behind and read as a plain bot."""
 
     def __init__(
         self,
@@ -193,16 +193,12 @@ class EditSink:
         thread_id: int | None,
         reply_to: int | None,
         *,
-        interval: float = 3.0,
         typing_interval: float = 4.5,
     ) -> None:
         self._bot = bot
         self._chat_id = chat_id
         self._thread_id = thread_id
         self._reply_to = reply_to
-        self._state = StreamState()
-        self._message_id: int | None = None
-        self._ticker = Ticker(self._flush, interval, None)
         self._typing = Ticker(self._send_typing, typing_interval, typing_interval)
 
     async def _send_typing(self) -> None:
@@ -214,40 +210,15 @@ class EditSink:
         self._typing.touch()
 
     async def on_event(self, event: AgentEvent) -> None:
-        if self._state.apply(event) and self._state.answer.strip():
-            self._ticker.touch()
-
-    async def _flush(self) -> None:
-        answer = self._state.answer
-        markdown = answer if len(answer) <= RICH_LIMIT else "…\n\n" + answer[-RICH_LIMIT:]
-        if self._message_id is None:
-            sent = await send_markdown(
-                self._bot, self._chat_id, markdown, thread_id=self._thread_id, reply_to=self._reply_to
-            )
-            self._message_id = sent[0].message_id if sent else None
-        else:
-            await edit_markdown(self._bot, self._chat_id, self._message_id, markdown)
-
-    async def _stop(self) -> None:
-        await self._ticker.stop()
-        await self._typing.stop()
+        return None
 
     async def finish(self, markdown: str, files: Sequence[FileProduced]) -> list[int]:
-        await self._stop()
-        chunks = split_markdown(markdown, RICH_LIMIT) or ["Готово."]
+        await self._typing.stop()
         ids: list[int] = []
-        if self._message_id is not None and await edit_markdown(
-            self._bot, self._chat_id, self._message_id, chunks[0]
-        ):
-            ids.append(self._message_id)
-        else:
+        for chunk in split_markdown(markdown, RICH_LIMIT) or ["Готово."]:
+            reply_to = ids[-1] if ids else self._reply_to
             sent = await send_markdown(
-                self._bot, self._chat_id, chunks[0], thread_id=self._thread_id, reply_to=self._reply_to
-            )
-            ids.extend(message.message_id for message in sent)
-        for chunk in chunks[1:]:
-            sent = await send_markdown(
-                self._bot, self._chat_id, chunk, thread_id=self._thread_id, reply_to=ids[-1] if ids else None
+                self._bot, self._chat_id, chunk, thread_id=self._thread_id, reply_to=reply_to
             )
             ids.extend(message.message_id for message in sent)
         await send_files(
@@ -256,16 +227,13 @@ class EditSink:
         return ids
 
     async def fail(self, text: str) -> None:
-        await self._stop()
-        if self._message_id is None or not await edit_markdown(
-            self._bot, self._chat_id, self._message_id, text
-        ):
-            await self._bot.send_message(
-                chat_id=self._chat_id,
-                text=text,
-                message_thread_id=self._thread_id,
-                reply_parameters=reply_parameters(self._reply_to),
-            )
+        await self._typing.stop()
+        await self._bot.send_message(
+            chat_id=self._chat_id,
+            text=text,
+            message_thread_id=self._thread_id,
+            reply_parameters=reply_parameters(self._reply_to),
+        )
 
 
 class GuestSink:

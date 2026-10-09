@@ -4,7 +4,7 @@ from aiogram.types import InputRichMessageContent, InputTextMessageContent
 
 from tests.telegram.fakes import FakeBot
 from tgagent.agent.events import FileProduced, TextDelta, ToolStarted
-from tgagent.telegram.sinks import DraftSink, EditSink, GuestSink, PlainSink
+from tgagent.telegram.sinks import DraftSink, GuestSink, PlainSink, TypingSink
 
 
 async def test_draft_sink_streams_coalesced_drafts_then_persists() -> None:
@@ -64,9 +64,9 @@ async def test_draft_sink_failure_message() -> None:
     assert bot.last("send_message")["text"] == "Ошибка"
 
 
-async def test_edit_sink_shows_native_typing_instead_of_placeholder() -> None:
+async def test_group_sink_shows_typing_while_working() -> None:
     bot = FakeBot()
-    sink = EditSink(bot.as_bot(), chat_id=-100, thread_id=4, reply_to=55, interval=0.01, typing_interval=0.02)
+    sink = TypingSink(bot.as_bot(), chat_id=-100, thread_id=4, reply_to=55, typing_interval=0.02)
 
     await sink.start()
     await sink.on_event(ToolStarted("web_search", "курс"))
@@ -78,39 +78,26 @@ async def test_edit_sink_shows_native_typing_instead_of_placeholder() -> None:
     await sink.finish("ok", [])
 
 
-async def test_edit_sink_streams_real_text_then_edits_final() -> None:
+async def test_group_sink_sends_one_complete_reply_however_the_text_streamed() -> None:
     bot = FakeBot()
-    sink = EditSink(bot.as_bot(), chat_id=-100, thread_id=None, reply_to=55, interval=0.01)
+    sink = TypingSink(bot.as_bot(), chat_id=-100, thread_id=None, reply_to=55, typing_interval=0.01)
 
     await sink.start()
-    await sink.on_event(TextDelta("част"))
-    await asyncio.sleep(0.05)
-    first = bot.last("send_rich_message")
-    ids = await sink.finish("Полный ответ", [])
+    for piece in ["х", "з, я ", "не в курсе"]:
+        await sink.on_event(TextDelta(piece))
+        await asyncio.sleep(0.02)
+    ids = await sink.finish("хз, я не в курсе", [])
 
-    assert first["markdown"] == "част"
-    assert first["reply_parameters"].message_id == 55
-    assert bot.last("edit_rich")["markdown"] == "Полный ответ"
-    assert ids == [bot.last("edit_rich")["message_id"]]
-    assert [name for name in bot.names() if name == "send_rich_message"] == ["send_rich_message"]
-
-
-async def test_edit_sink_without_streamed_text_sends_answer_on_finish() -> None:
-    bot = FakeBot()
-    sink = EditSink(bot.as_bot(), chat_id=-100, thread_id=None, reply_to=55)
-
-    await sink.start()
-    ids = await sink.finish("Ответ", [])
-
-    sent = bot.last("send_rich_message")
-    assert (sent["markdown"], sent["reply_parameters"].message_id) == ("Ответ", 55)
+    sent = [p for name, p in bot.calls if name == "send_rich_message"]
+    assert [p["markdown"] for p in sent] == ["хз, я не в курсе"]
+    assert sent[0]["reply_parameters"].message_id == 55
     assert "edit_rich" not in bot.names()
     assert len(ids) == 1
 
 
-async def test_edit_sink_overflow_goes_to_follow_up_messages() -> None:
+async def test_group_sink_overflow_goes_to_follow_up_messages() -> None:
     bot = FakeBot()
-    sink = EditSink(bot.as_bot(), chat_id=-100, thread_id=None, reply_to=55)
+    sink = TypingSink(bot.as_bot(), chat_id=-100, thread_id=None, reply_to=55)
     final = "\n\n".join(["a" * 20_000, "b" * 20_000])
 
     await sink.start()
@@ -120,9 +107,9 @@ async def test_edit_sink_overflow_goes_to_follow_up_messages() -> None:
     assert bot.last("send_rich_message")["reply_parameters"].message_id == ids[0]
 
 
-async def test_edit_sink_failure_without_message_sends_text() -> None:
+async def test_group_sink_failure_sends_text() -> None:
     bot = FakeBot()
-    sink = EditSink(bot.as_bot(), chat_id=-100, thread_id=None, reply_to=55)
+    sink = TypingSink(bot.as_bot(), chat_id=-100, thread_id=None, reply_to=55)
 
     await sink.start()
     await sink.fail("Ошибка")

@@ -8,7 +8,7 @@ from tgagent.telegram.access import GROUP_TYPES
 from tgagent.telegram.bursts import pick_trigger
 from tgagent.telegram.deps import Deps
 from tgagent.telegram.handlers.common import SUPPORTED_CONTENT, remember_user
-from tgagent.telegram.sinks import EditSink
+from tgagent.telegram.sinks import TypingSink
 from tgagent.telegram.triggers import is_addressed
 
 router = Router(name="groups")
@@ -55,8 +55,8 @@ async def on_group_message(message: Message, bot: Bot, deps: Deps) -> None:
         trigger=normalized,
         reply_context=await reply_context(trigger, deps),
         album=tuple(normalize(m) for m in rest),
-        options=deps.options(await deps.chats.get_settings(message.chat.id)),
+        options=deps.options(await deps.chats.get_settings(user.id)),
     )
-    sink = EditSink(bot, message.chat.id, normalized.thread_id, reply_to=trigger.message_id)
+    sink = TypingSink(bot, message.chat.id, normalized.thread_id, reply_to=trigger.message_id)
     async with deps.locks.hold(message.chat.id):
         await deps.turns.run(request, sink)
