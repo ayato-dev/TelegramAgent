@@ -195,18 +195,25 @@ class TurnService:
         conversation, parent_id, from_reply = await self._resolve(request)
         assert conversation.model is not None
         runner = self._runners.runner(conversation.model)
-        compacted = await self._compact(request, conversation, parent_id, runner)
-        turn = TurnInput(
-            request.trigger,
-            context=() if from_reply else request.reply_context,
-            album=request.album,
-            environment=self._environment(request) if parent_id is None or compacted else None,
+        # The person sees the bot at work while it summarises the history or reads attachments.
+        await sink.start()
+        try:
+            compacted = await self._compact(request, conversation, parent_id, runner)
+            turn = TurnInput(
+                request.trigger,
+                context=() if from_reply else request.reply_context,
+                album=request.album,
+                environment=self._environment(request) if parent_id is None or compacted else None,
+            )
+            content = await runner.encode_user(
+                turn, include_author=request.include_author, code_enabled=request.options.code
+            )
+        except Exception as exc:
+            await self._fail(request, sink, exc)
+            return
+        user_node = await self._conversations.add_node(
+            conversation.id, compacted or parent_id, "user", content
         )
-        parent_id = compacted or parent_id
-        content = await runner.encode_user(
-            turn, include_author=request.include_author, code_enabled=request.options.code
-        )
-        user_node = await self._conversations.add_node(conversation.id, parent_id, "user", content)
         path = await self._conversations.path(user_node)
         container = conversation.container_id
         if conversation.container_expires_at and conversation.container_expires_at <= datetime.now(UTC):
@@ -215,7 +222,6 @@ class TurnService:
             request.chat_id, request.thread_id, request.user_id, request.kind, request.trigger.message_id
         )
 
-        await sink.start()
         prepared = time.monotonic() - started
         first_output: float | None = None
         partial: list[str] = []
@@ -237,9 +243,7 @@ class TurnService:
             await self._stopped(request, conversation, user_node, "".join(partial).strip(), files, sink)
             raise
         except Exception as exc:
-            error = classify(exc)
-            log.exception("agent turn failed in chat %s (%s)", request.chat_id, error.kind)
-            await sink.fail(error_text(error, request.lang))
+            await self._fail(request, sink, exc)
             return
 
         assert result is not None
@@ -273,6 +277,11 @@ class TurnService:
             task = asyncio.create_task(self._on_title(conversation, question, result.text))
             self._background.add(task)
             task.add_done_callback(self._background.discard)
+
+    async def _fail(self, request: TurnRequest, sink: ResponseSink, exc: Exception) -> None:
+        error = classify(exc)
+        log.exception("agent turn failed in chat %s (%s)", request.chat_id, error.kind)
+        await sink.fail(error_text(error, request.lang))
 
     async def _deliver(
         self,

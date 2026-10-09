@@ -474,3 +474,39 @@ async def test_rate_limit_tells_when_to_retry(sessions: SessionFactory) -> None:
 
     assert len(sink.failed) == 1
     assert "20 с" in sink.failed[0]
+
+
+async def test_typing_shows_while_the_history_is_being_summarised(sessions: SessionFactory) -> None:
+    oss = ScriptedRunner(
+        [result(("assistant", [TEXT]), prompt_tokens=5_000), result(("assistant", [TEXT]))], spec=CLIENT_SIDE
+    )
+    turns = service(sessions, oss)
+    await turns.run(private(message(1, "раз")), RecordingSink())
+    sink = RecordingSink()
+    started_when_summarising: list[bool] = []
+    summarise = oss.complete
+
+    async def watched(prompt: str, *, max_tokens: int) -> tuple[str, TurnUsage]:
+        started_when_summarising.append(sink.started)
+        return await summarise(prompt, max_tokens=max_tokens)
+
+    oss.complete = watched  # type: ignore[method-assign]
+
+    await turns.run(private(message(2, "два")), sink)
+
+    assert started_when_summarising == [True]
+
+
+async def test_failure_while_preparing_the_turn_is_reported(sessions: SessionFactory) -> None:
+    oss = ScriptedRunner([], spec=OSS)
+
+    async def broken(*args: Any, **kwargs: Any) -> Content:
+        raise RuntimeError("download failed")
+
+    oss.encode_user = broken  # type: ignore[method-assign]
+    sink = RecordingSink()
+
+    await service(sessions, oss).run(private(message(1, "фото")), sink)
+
+    assert sink.started
+    assert sink.failed == [t("ru", "failure")]
