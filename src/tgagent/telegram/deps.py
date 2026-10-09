@@ -7,6 +7,7 @@ from tgagent.agent.models import ModelSpec
 from tgagent.agent.tools import AgentOptions
 from tgagent.config import Settings
 from tgagent.services.generation import GenerationRegistry, KeyedLocks
+from tgagent.services.secretary import SecretaryService
 from tgagent.services.settings import options_from
 from tgagent.services.turns import TurnService
 from tgagent.services.usage_report import UsageReport
@@ -31,6 +32,7 @@ class Deps:
     locks: KeyedLocks
     generations: GenerationRegistry
     bursts: BurstCollector
+    secretary: SecretaryService
     # Models the bot can run, the default one included.
     models: tuple[ModelSpec, ...]
 

@@ -13,7 +13,7 @@ from collections.abc import AsyncIterator, Sequence
 from decimal import Decimal
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, omit
 from openai.types.responses import Response
 
 from tgagent.agent.base import as_text_block, summarize_tool
@@ -148,13 +148,16 @@ class ResponsesRunner:
     async def encode_user(self, turn: TurnInput, *, include_author: bool, code_enabled: bool) -> Content:
         return await self._builder.build(turn, include_author=include_author, code_enabled=code_enabled)
 
-    async def complete(self, prompt: str, *, max_tokens: int) -> tuple[str, TurnUsage]:
+    async def complete(
+        self, prompt: str, *, max_tokens: int, system: str | None = None
+    ) -> tuple[str, TurnUsage]:
         result = await self._client.responses.create(
             model=self.spec.model_id,
             input=prompt,
             max_output_tokens=max_tokens,
             reasoning={"effort": "low"},
             store=False,
+            instructions=system or omit,
         )
         usage = TurnUsage()
         self._add_usage(usage, result)

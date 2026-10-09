@@ -301,3 +301,12 @@ async def test_client_side_summary_opens_the_replay() -> None:
         {"role": "user", "content": [{"type": "input_text", "text": summary}]},
         {"role": "user", "content": [{"type": "input_text", "text": "дальше"}]},
     ]
+
+
+async def test_complete_passes_a_system_prompt() -> None:
+    fake = FakeOpenAI([])
+    fake.responses.completions.append(response([message("ok")]))
+
+    await runner(fake).complete("hi", max_tokens=256, system="be brief")
+
+    assert fake.responses.calls[0]["instructions"] == "be brief"

@@ -107,6 +107,26 @@ class ChatMessage(Base):
     from_bot: Mapped[bool] = mapped_column(Boolean, server_default=sql("false"))
 
 
+class SecretaryMessage(Base):
+    """What the secretary saw and said in the private chats of a connected business account."""
+
+    __tablename__ = "secretary_messages"
+    __table_args__ = (Index(None, "connection_id", "chat_id", "date"),)
+
+    connection_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # person, owner or bot
+    sender: Mapped[str] = mapped_column(String(8))
+    sender_id: Mapped[int | None] = mapped_column(BigInteger)
+    sender_name: Mapped[str] = mapped_column(String(256))
+    date: Mapped[datetime] = mapped_column(UtcDateTime())
+    text: Mapped[str | None] = mapped_column(Text)
+    media: Mapped[dict[str, Any] | None] = mapped_column(JsonValue)
+    # On the bot's replies: the newest message of the person the reply answered.
+    reply_to_message_id: Mapped[int | None] = mapped_column(BigInteger)
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
     __table_args__ = (

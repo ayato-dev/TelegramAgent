@@ -55,7 +55,9 @@ class ScriptedRunner:
     async def encode_user(self, turn: TurnInput, *, include_author: bool, code_enabled: bool) -> Content:
         return await self._builder.build(turn, include_author=include_author, code_enabled=code_enabled)
 
-    async def complete(self, prompt: str, *, max_tokens: int) -> tuple[str, TurnUsage]:
+    async def complete(
+        self, prompt: str, *, max_tokens: int, system: str | None = None
+    ) -> tuple[str, TurnUsage]:
         self.prompts.append(prompt)
         if isinstance(self.summary, Exception):
             raise self.summary

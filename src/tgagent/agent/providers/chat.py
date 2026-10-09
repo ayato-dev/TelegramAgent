@@ -15,6 +15,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 from openai.types import CompletionUsage
+from openai.types.chat import ChatCompletionMessageParam
 
 from tgagent.agent.base import as_text_block, summarize_tool
 from tgagent.agent.events import AgentEvent, FileProduced, TextDelta, ThinkingDelta, ToolStarted, TurnResult
@@ -139,10 +140,15 @@ class ChatRunner:
     async def encode_user(self, turn: TurnInput, *, include_author: bool, code_enabled: bool) -> Content:
         return await self._builder.build(turn, include_author=include_author, code_enabled=code_enabled)
 
-    async def complete(self, prompt: str, *, max_tokens: int) -> tuple[str, TurnUsage]:
+    async def complete(
+        self, prompt: str, *, max_tokens: int, system: str | None = None
+    ) -> tuple[str, TurnUsage]:
+        messages: list[ChatCompletionMessageParam] = [{"role": "user", "content": prompt}]
+        if system:
+            messages.insert(0, {"role": "system", "content": system})
         response = await self._client.chat.completions.create(
             model=self.spec.model_id,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             max_tokens=max_tokens,
             **self._profile.quick,
         )

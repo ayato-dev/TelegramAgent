@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -10,8 +11,10 @@ from tgagent.storage.repos import (
     ChatLogRepo,
     ChatRepo,
     ConversationRepo,
+    LoggedMessage,
     MediaRepo,
     ReminderRepo,
+    SecretaryLogRepo,
     UsageRecord,
     UsageRepo,
 )
@@ -281,3 +284,85 @@ async def test_times_come_back_aware_and_compare_correctly(sessions: SessionFact
     assert due == moscow and due is not None and due.tzinfo is not None
     assert early == []
     assert [r.due_at for r in claimed] == [moscow]
+
+
+def secretary_message(
+    message_id: int,
+    sender: str = "person",
+    *,
+    minutes: int = 0,
+    chat_id: int = 7,
+    connection_id: str = "conn",
+    reply_to: int | None = None,
+) -> LoggedMessage:
+    names = {"person": "Иван", "owner": "Виталий", "bot": "bot"}
+    sender_ids = {"person": 7, "owner": 1, "bot": None}
+    return LoggedMessage(
+        connection_id=connection_id,
+        chat_id=chat_id,
+        message_id=message_id,
+        sender=sender,  # type: ignore[arg-type]
+        sender_id=sender_ids[sender],
+        sender_name=names[sender],
+        date=NOW + timedelta(minutes=minutes),
+        text=f"msg {message_id}",
+        reply_to_message_id=reply_to,
+    )
+
+
+async def test_secretary_log_keeps_each_connection_apart(sessions: SessionFactory) -> None:
+    repo = SecretaryLogRepo(sessions)
+    voice = MediaRef("voice", "f", "u", duration=3)
+    await repo.add(secretary_message(1))
+    await repo.add(secretary_message(2, "bot", minutes=1, reply_to=1))
+    await repo.add(secretary_message(1, connection_id="other"))
+    await repo.add(replace(secretary_message(3, minutes=2), media=voice))
+
+    recent = await repo.recent("conn", 7, limit=2)
+
+    assert [m.message_id for m in recent] == [2, 3]
+    assert recent[0].reply_to_message_id == 1
+    assert recent[1].media == voice
+
+
+async def test_secretary_log_overwrites_a_message_seen_twice(sessions: SessionFactory) -> None:
+    repo = SecretaryLogRepo(sessions)
+    await repo.add(secretary_message(1))
+    await repo.add(replace(secretary_message(1), text="edited"))
+
+    assert [m.text for m in await repo.recent("conn", 7, limit=10)] == ["edited"]
+
+
+async def test_secretary_replies_count_after_the_owner_writes(sessions: SessionFactory) -> None:
+    repo = SecretaryLogRepo(sessions)
+    for message in (
+        secretary_message(1, "bot", minutes=0),
+        secretary_message(2, "owner", minutes=1),
+        secretary_message(3, "bot", minutes=2),
+        secretary_message(4, "bot", minutes=3),
+        secretary_message(5, "bot", minutes=4, chat_id=8),
+    ):
+        await repo.add(message)
+
+    assert await repo.replies_since("conn", 7, NOW - timedelta(hours=1)) == 2
+    assert await repo.replies_since("conn", 7, NOW + timedelta(minutes=3)) == 0
+    assert await repo.replies_since("conn", 8, NOW - timedelta(hours=1)) == 1
+
+
+async def test_secretary_log_knows_when_the_owner_last_wrote(sessions: SessionFactory) -> None:
+    repo = SecretaryLogRepo(sessions)
+    assert await repo.owner_last_seen(1) is None
+    await repo.add(secretary_message(1, "owner", minutes=5))
+    await repo.add(secretary_message(2, "owner", minutes=9, chat_id=8))
+    await repo.add(secretary_message(3, "person", minutes=20))
+
+    assert await repo.owner_last_seen(1) == NOW + timedelta(minutes=9)
+
+
+async def test_secretary_log_purge_removes_old_messages(sessions: SessionFactory) -> None:
+    repo = SecretaryLogRepo(sessions)
+    await repo.add(secretary_message(1, minutes=-60 * 24 * 40))
+    await repo.add(secretary_message(2))
+
+    assert await repo.purge_older_than(NOW - timedelta(days=30)) == 1
+    assert [m.message_id for m in await repo.recent("conn", 7, limit=10)] == [2]

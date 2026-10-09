@@ -10,6 +10,7 @@ from tgagent.storage.repos.conversations import (
 )
 from tgagent.storage.repos.media import MediaEntry, MediaRepo
 from tgagent.storage.repos.reminders import ReminderMode, ReminderRecord, ReminderRepo
+from tgagent.storage.repos.secretary import LoggedMessage, SecretaryLogRepo, Sender
 from tgagent.storage.repos.usage import UsageKind, UsageRecord, UsageRepo, UsageTotals
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "ConversationKind",
     "ConversationRecord",
     "ConversationRepo",
+    "LoggedMessage",
     "MediaEntry",
     "MediaRepo",
     "NodeRecord",
@@ -26,6 +28,8 @@ __all__ = [
     "ReminderRecord",
     "ReminderRepo",
     "Role",
+    "SecretaryLogRepo",
+    "Sender",
     "UsageKind",
     "UsageRecord",
     "UsageRepo",

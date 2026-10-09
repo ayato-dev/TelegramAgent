@@ -31,7 +31,9 @@ class FakeTitleRunner:
     def __init__(self) -> None:
         self.prompts: list[tuple[str, int]] = []
 
-    async def complete(self, prompt: str, *, max_tokens: int) -> tuple[str, TurnUsage]:
+    async def complete(
+        self, prompt: str, *, max_tokens: int, system: str | None = None
+    ) -> tuple[str, TurnUsage]:
         self.prompts.append((prompt, max_tokens))
         usage = TurnUsage()
         usage.add_iteration(100, 10, 0, 0)

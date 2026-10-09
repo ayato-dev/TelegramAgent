@@ -279,3 +279,12 @@ async def test_complete_is_a_cheap_single_request() -> None:
     assert params["thinking"] == {"type": "disabled"}
     assert params["output_config"] == {"effort": "low"}
     assert params["messages"] == [{"role": "user", "content": "назови диалог"}]
+
+
+async def test_complete_passes_a_system_prompt() -> None:
+    fake = FakeAnthropic([])
+    fake.messages.created.append(final([{"type": "text", "text": "ok"}]))
+
+    await runner(fake).complete("hi", max_tokens=256, system="be brief")
+
+    assert fake.messages.create_calls[0]["system"] == "be brief"

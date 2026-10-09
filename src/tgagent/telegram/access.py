@@ -144,6 +144,11 @@ class AccessMiddleware(BaseMiddleware):
             return policy.user_allowed(update.callback_query.from_user.id)
         if update.stopped_message_generation:
             return policy.user_allowed(update.stopped_message_generation.chat.id)
+        if update.business_connection:
+            return policy.user_allowed(update.business_connection.user.id)
+        if update.business_message:
+            # Anyone may write to the owner; the secretary checks whose connection it came through.
+            return True
         return update.my_chat_member is not None
 
     async def _leave_unknown_group(self, update: Update) -> None:

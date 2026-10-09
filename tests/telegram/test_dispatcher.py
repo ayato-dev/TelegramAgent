@@ -26,6 +26,8 @@ def test_dispatcher_subscribes_to_agent_update_types() -> None:
         "my_chat_member",
         "guest_message",
         "stopped_message_generation",
+        "business_connection",
+        "business_message",
     } <= used
 
 

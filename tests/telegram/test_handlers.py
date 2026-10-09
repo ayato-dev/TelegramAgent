@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
 
-from aiogram.types import Chat, ChatMemberLeft, ChatMemberMember, ChatMemberUpdated, User
+from aiogram.types import Chat, ChatMemberLeft, ChatMemberMember, ChatMemberUpdated, Message, User
 
 from tests.telegram.fakes import FakeBot
 from tgagent.services.turns import TurnRequest, TurnService
@@ -10,6 +10,7 @@ from tgagent.storage.repos import ChatRepo, ReminderRecord, UserRepo
 from tgagent.telegram.access import AccessPolicy
 from tgagent.telegram.deps import Deps
 from tgagent.telegram.handlers.membership import handle_membership
+from tgagent.telegram.handlers.private import on_private_message
 from tgagent.telegram.reminder_delivery import ReminderDelivery
 from tgagent.telegram.sinks import PlainSink, ResponseSink
 
@@ -223,3 +224,20 @@ async def test_reminder_speaks_its_authors_language() -> None:
     await delivery(bot, turns, users=FakeUsers("en"))(record)
 
     assert bot.last("send_rich_message")["markdown"].startswith("⏰ **Reminder**")
+
+
+async def test_writing_to_the_bot_counts_as_being_online() -> None:
+    seen: list[tuple[int, datetime]] = []
+
+    async def later_part_of_a_burst(message: Message) -> None:
+        return None
+
+    private_deps = SimpleNamespace(
+        secretary=SimpleNamespace(saw_owner=lambda user_id, when: seen.append((user_id, when))),
+        bursts=SimpleNamespace(collect=later_part_of_a_burst),
+    )
+    message = Message(message_id=5, date=NOW, chat=Chat(id=1, type="private"), from_user=OWNER, text="hi")
+
+    await on_private_message(message, FakeBot().as_bot(), cast(Deps, private_deps))
+
+    assert seen == [(OWNER.id, NOW)]

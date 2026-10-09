@@ -117,13 +117,16 @@ class GeminiRunner:
         content = await self._builder.build(turn, include_author=include_author, code_enabled=code_enabled)
         return content + youtube_parts(content)
 
-    async def complete(self, prompt: str, *, max_tokens: int) -> tuple[str, TurnUsage]:
+    async def complete(
+        self, prompt: str, *, max_tokens: int, system: str | None = None
+    ) -> tuple[str, TurnUsage]:
         response = await self._client.aio.models.generate_content(
             model=self.spec.model_id,
             contents=prompt,
             config=types.GenerateContentConfig(
                 max_output_tokens=max_tokens,
                 thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW),
+                system_instruction=system,
             ),
         )
         usage = TurnUsage()

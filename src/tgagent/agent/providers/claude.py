@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator, Sequence
 from pathlib import PurePosixPath
 from typing import Any
 
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, omit
 from anthropic.types.beta import BetaMessage
 
 from tgagent.agent.base import summarize_tool
@@ -104,13 +104,16 @@ class ClaudeRunner:
     async def encode_user(self, turn: TurnInput, *, include_author: bool, code_enabled: bool) -> Content:
         return await self._builder.build(turn, include_author=include_author, code_enabled=code_enabled)
 
-    async def complete(self, prompt: str, *, max_tokens: int) -> tuple[str, TurnUsage]:
+    async def complete(
+        self, prompt: str, *, max_tokens: int, system: str | None = None
+    ) -> tuple[str, TurnUsage]:
         response = await self._client.beta.messages.create(
             model=self.spec.model_id,
             max_tokens=max_tokens,
             thinking={"type": "disabled"},
             output_config={"effort": "low"},
             messages=[{"role": "user", "content": prompt}],
+            system=system or omit,
         )
         usage = TurnUsage()
         usage.add(response.usage)

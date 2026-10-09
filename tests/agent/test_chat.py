@@ -404,3 +404,27 @@ async def test_complete_switches_deepseek_thinking_off() -> None:
     assert params["messages"] == [{"role": "user", "content": "назови диалог"}]
     assert params["max_tokens"] == 256
     assert params["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+async def test_complete_puts_the_system_prompt_first() -> None:
+    fake = FakeChatClient([])
+    fake.completions.completions.append(
+        ChatCompletion.model_validate(
+            {
+                "id": "c",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "m",
+                "choices": [
+                    {"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}
+                ],
+            }
+        )
+    )
+
+    await runner(fake).complete("hi", max_tokens=256, system="be brief")
+
+    assert fake.completions.calls[0]["messages"] == [
+        {"role": "system", "content": "be brief"},
+        {"role": "user", "content": "hi"},
+    ]

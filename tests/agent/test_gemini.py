@@ -340,3 +340,12 @@ async def test_client_side_summary_is_merged_into_the_first_user_turn() -> None:
 
     summary = "<conversation_summary>\nитоги\n</conversation_summary>"
     assert contents(fake) == [{"role": "user", "parts": [{"text": summary}, {"text": "дальше"}]}]
+
+
+async def test_complete_passes_a_system_prompt() -> None:
+    fake = FakeGemini([])
+    fake.models.completions.append(chunk({"text": "ok"}, finish="STOP"))
+
+    await runner(fake).complete("hi", max_tokens=256, system="be brief")
+
+    assert fake.models.calls[0]["config"].system_instruction == "be brief"

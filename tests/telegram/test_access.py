@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 from aiogram.types import (
+    BusinessConnection,
     CallbackQuery,
     Chat,
     ChatMemberLeft,
@@ -23,6 +24,10 @@ NOW = datetime.now(UTC)
 
 def msg(chat: Chat, user: User) -> Message:
     return Message(message_id=1, date=NOW, chat=chat, from_user=user, text="hi")
+
+
+def connection(user: User) -> BusinessConnection:
+    return BusinessConnection(id="c", user=user, user_chat_id=user.id, date=NOW, is_enabled=True)
 
 
 PRIVATE_OWNER = Chat(id=1, type="private")
@@ -76,6 +81,10 @@ async def run(update: Update) -> tuple[bool, AccessPolicy]:
             ),
             True,
         ),
+        (Update(update_id=1, business_connection=connection(OWNER)), True),
+        (Update(update_id=1, business_connection=connection(STRANGER)), False),
+        # Anyone writes to the owner's business chats; the secretary checks whose connection it is.
+        (Update(update_id=1, business_message=msg(PRIVATE_STRANGER, STRANGER)), True),
         (
             Update(
                 update_id=1,

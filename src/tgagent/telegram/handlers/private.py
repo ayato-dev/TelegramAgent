@@ -26,6 +26,8 @@ async def on_topic_created(message: Message, deps: Deps) -> None:
 
 @router.message(F.content_type.in_(SUPPORTED_CONTENT))
 async def on_private_message(message: Message, bot: Bot, deps: Deps) -> None:
+    if message.from_user is not None:
+        deps.secretary.saw_owner(message.from_user.id, message.date)
     batch = await deps.bursts.collect(message)
     if batch is None:
         return

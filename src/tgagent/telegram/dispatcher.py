@@ -4,7 +4,7 @@ from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandSc
 from tgagent.i18n import Lang, t
 from tgagent.telegram.access import AccessMiddleware
 from tgagent.telegram.deps import Deps
-from tgagent.telegram.handlers import commands, groups, guest, membership, private
+from tgagent.telegram.handlers import business, commands, groups, guest, membership, private
 
 
 def private_commands(lang: Lang) -> list[BotCommand]:
@@ -39,6 +39,7 @@ def build_dispatcher(deps: Deps, bot: Bot) -> Dispatcher:
         private.router,
         groups.router,
         guest.router,
+        business.router,
     )
     dispatcher["deps"] = deps
     return dispatcher

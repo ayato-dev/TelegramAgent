@@ -29,7 +29,9 @@ class LLMRunner(Protocol):
         """One agent turn over the root-to-leaf ``path``; the last event is a TurnResult."""
         ...
 
-    async def complete(self, prompt: str, *, max_tokens: int) -> tuple[str, TurnUsage]:
+    async def complete(
+        self, prompt: str, *, max_tokens: int, system: str | None = None
+    ) -> tuple[str, TurnUsage]:
         """A cheap single request without tools, e.g. for topic titles."""
         ...
 

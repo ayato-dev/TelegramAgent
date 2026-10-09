@@ -203,6 +203,24 @@ TEXTS: dict[str, dict[Lang, str]] = {
     # Reminders and access
     "reminder": {"ru": "⏰ **Напоминание**", "en": "⏰ **Reminder**"},
     "access_denied": {"ru": "Доступ к боту закрыт.", "en": "This bot is private."},
+    # Secretary mode
+    "secretary.connected": {
+        "ru": "Секретарь подключён. Он отвечает от вашего имени в чатах, выбранных в настройках Telegram "
+        "для бизнеса. Что он пишет, задаёт prompts/secretary.md, когда отвечает — prompts/secretary.toml.",
+        "en": "Secretary connected. It replies on your behalf in the chats chosen in Telegram Business "
+        "settings. prompts/secretary.md sets what it writes, prompts/secretary.toml when it replies.",
+    },
+    "secretary.no_reply": {
+        "ru": "Секретарь подключён без права отвечать на сообщения, поэтому молчит. Разрешите ответы: "
+        "Настройки → Telegram для бизнеса → Чат-боты.",
+        "en": "The secretary is connected without permission to reply to messages, so it stays silent. "
+        "Allow replies in Settings → Telegram Business → Chatbots.",
+    },
+    "secretary.off": {
+        "ru": "Бот подключён, но режим секретаря выключен в prompts/secretary.toml (enabled = false).",
+        "en": "The bot is connected, but secretary mode is off in prompts/secretary.toml (enabled = false).",
+    },
+    "secretary.disconnected": {"ru": "Секретарь отключён.", "en": "Secretary disconnected."},
 }
 
 

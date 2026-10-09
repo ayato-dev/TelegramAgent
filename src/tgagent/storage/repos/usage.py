@@ -9,7 +9,7 @@ from sqlalchemy.orm import InstrumentedAttribute
 from tgagent.storage.db import SessionFactory
 from tgagent.storage.models import UsageEvent
 
-UsageKind = Literal["chat", "title", "stt", "compaction"]
+UsageKind = Literal["chat", "title", "stt", "compaction", "secretary"]
 
 
 @dataclass(frozen=True, slots=True)

@@ -45,6 +45,8 @@ Then configure the bot in @BotFather → Bot Settings:
   While it works, the chat shows the typing status; the answer is posted as one message.
 - **Guest mode.** The bot can be called in any chat, including chats it is not a member of, and answers
   once.
+- **Secretary mode.** Connected to your account through Telegram Business, the bot answers people in your
+  private chats on your behalf, by rules set in a config file. See [Secretary mode](#secretary-mode).
 - **Grouped messages.** Messages sent by one person in quick succession (a comment and the posts
   forwarded with it, an album) are handled as one request.
 - **Forwarded posts.** A post sent without a question is explained: what it is about, the background it
@@ -220,6 +222,41 @@ Documents a model cannot read natively are converted to text: PDF text is extrac
 signed PDFs), text files are inserted as is. Other binary files are passed to the code sandbox with Claude
 only.
 
+## Secretary mode
+
+The bot can answer people in your private chats on your behalf through Telegram Business (a Telegram
+Premium feature).
+
+1. In Telegram, open Settings → Telegram Business → Chatbots, enter the bot's username, choose the chats it
+   may access and allow it to reply to messages.
+2. The bot confirms the connection in its chat with you. Only accounts listed in `ALLOWED_USER_IDS` can
+   connect it; connections from other accounts are ignored.
+
+The secretary makes a single request to the model per reply, without web search, code execution or
+reminders: the people it answers are not on the whitelist. The model reads the chat's latest messages,
+including yours and its own earlier replies. Voice and video notes are transcribed when `GROQ_API_KEY` is
+set. Spending is counted as yours in `/usage`.
+
+`prompts/secretary.md` sets what the secretary writes; while the file contains only its comment, a
+built-in prompt is used. `prompts/secretary.toml` sets when it replies:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | `false` turns secretary mode off without disconnecting the bot |
+| `online_minutes` | `10` | You count as online for this many minutes after your last message in a connected chat or to the bot |
+| `reply_when_online` | `false` | Reply while you are online. With `false` the bot waits until you have been away for `online_minutes` and stays silent if you answer first |
+| `delay_seconds` | `5` | Pause after the person's last message, so several messages in a row get one reply |
+| `max_replies`, `limit_hours` | `3`, `24` | At most `max_replies` replies per chat within `limit_hours`. Your own message in the chat resets the count. `0` removes the limit |
+| `hours` | `""` | Reply only within these local hours, e.g. `"09:00-23:00"` or `"22:00-08:00"`. Empty: any time |
+| `voice` | `true` | Transcribe voice and video notes |
+| `history` | `30` | How many of the chat's latest messages the model reads |
+| `model` | `""` | Model for the secretary, e.g. `anthropic:claude-haiku-5-5`. Empty: the model chosen in `/settings` |
+
+Telegram does not tell bots whether a user is online, so the bot judges by the last message of yours it has
+seen. A pending reply needs a running process: if the bot restarts while waiting, it replies after the
+person's next message. On hosts that stop the CPU between requests (`WEBHOOK_INLINE`), waiting does not
+work.
+
 ## Prompts
 
 The `prompts/` folder contains prompt files that can be edited without changing code:
@@ -228,9 +265,11 @@ The `prompts/` folder contains prompt files that can be edited without changing 
   prompt.
 - `system.md` — a template. While it contains only its comment, the built-in prompt is used. Text written
   below the comment replaces the built-in system prompt.
-- `secretary.md` — a template reserved for secretary mode (not implemented yet).
+- `secretary.md` — a template for the secretary's prompt. While it contains only its comment, the
+  built-in prompt is used.
+- `secretary.toml` — secretary mode settings, see [Secretary mode](#secretary-mode).
 
-Prompt files are read at startup. With Docker, rebuild the image or mount the folder:
+These files are read at startup. With Docker, rebuild the image or mount the folder:
 `-v ./prompts:/app/prompts:ro`. `PROMPTS_DIR` sets a different location.
 
 ## Configuration
@@ -254,7 +293,7 @@ Prompt files are read at startup. With Docker, rebuild the image or mount the fo
 | `REMINDER_POLL_SECONDS` | Interval between reminder checks (default 60) |
 | `PROMPTS_DIR` | Folder with prompt files (default `prompts`) |
 | `TIMEZONE` | Time zone for reminders (default Europe/Moscow) |
-| `CHAT_LOG_RETENTION_DAYS` | Retention of group message logs (default 30) |
+| `CHAT_LOG_RETENTION_DAYS` | Retention of group message logs and the secretary's chats (default 30) |
 | `LOG_LEVEL` | INFO or DEBUG |
 
 ## Architecture
@@ -276,7 +315,7 @@ Telegram ──polling or webhook──▶ AccessMiddleware ─▶ handlers (pri
 |---|---|
 | `agent/` | model catalog and pricing, prompts, tools, provider runners (`providers/`), error handling |
 | `context/` | Telegram message rendering, per-provider media encoding, PDF handling, history tree |
-| `services/` | turn processing, summarisation, stop handling, reminders, tool handlers, topic titles, usage |
+| `services/` | turn processing, summarisation, stop handling, reminders, tool handlers, topic titles, usage, secretary mode |
 | `telegram/` | handlers, access control, Markdown rendering, streaming, webhook server |
 | `storage/` | SQLAlchemy models, repositories, Alembic migrations |
 | `i18n.py` | interface texts in Russian and English |

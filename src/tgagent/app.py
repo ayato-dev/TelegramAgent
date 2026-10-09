@@ -13,6 +13,7 @@ from openai import AsyncOpenAI
 
 from tgagent.agent.base import LLMRunner
 from tgagent.agent.models import ModelSpec, Provider, available_models
+from tgagent.agent.prompt import prompts_dir, secretary_prompt
 from tgagent.agent.providers.chat import ChatRunner
 from tgagent.agent.providers.claude import ClaudeRunner
 from tgagent.agent.providers.gemini import GeminiRunner
@@ -26,6 +27,8 @@ from tgagent.context.media import MediaService
 from tgagent.services.agent_tools import AgentTools
 from tgagent.services.generation import GenerationRegistry, KeyedLocks
 from tgagent.services.reminders import ReminderScheduler
+from tgagent.services.secretary import SecretaryService
+from tgagent.services.secretary_config import load_secretary_config
 from tgagent.services.titles import TopicTitler
 from tgagent.services.turns import TurnService
 from tgagent.services.usage_report import UsageReport
@@ -37,6 +40,7 @@ from tgagent.storage.repos import (
     MediaRepo,
     ReminderRecord,
     ReminderRepo,
+    SecretaryLogRepo,
     UsageRepo,
     UserRepo,
 )
@@ -154,17 +158,19 @@ async def heartbeat(path: Path) -> None:
         await asyncio.sleep(30)
 
 
-async def purge_old_chat_log(chat_log: ChatLogRepo, days: int) -> int:
-    removed = await chat_log.purge_older_than(datetime.now(UTC) - timedelta(days=days))
+async def purge_old_chat_log(chat_log: ChatLogRepo, secretary_log: SecretaryLogRepo, days: int) -> int:
+    """Group messages and the secretary's chats are kept for the same number of days."""
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    removed = await chat_log.purge_older_than(cutoff) + await secretary_log.purge_older_than(cutoff)
     if removed:
         log.info("purged %d old chat log messages", removed)
     return removed
 
 
-async def purge_chat_log(chat_log: ChatLogRepo, days: int) -> None:
+async def purge_chat_log(chat_log: ChatLogRepo, secretary_log: SecretaryLogRepo, days: int) -> None:
     while True:
         try:
-            await purge_old_chat_log(chat_log, days)
+            await purge_old_chat_log(chat_log, secretary_log, days)
         except Exception:
             log.exception("chat log purge failed")
         await asyncio.sleep(6 * 3600)
@@ -177,11 +183,13 @@ async def _stop(tasks: list[asyncio.Task[None]]) -> None:
 
 
 async def serve(settings: Settings, stack: AsyncExitStack) -> None:
+    secretary_config = load_secretary_config(prompts_dir() / "secretary.toml")
     engine = create_engine(settings.database_url)
     stack.push_async_callback(engine.dispose)
     sessions = create_sessionmaker(engine)
     users, chats, chat_log = UserRepo(sessions), ChatRepo(sessions), ChatLogRepo(sessions)
     conversations, usage, reminders = ConversationRepo(sessions), UsageRepo(sessions), ReminderRepo(sessions)
+    secretary_log = SecretaryLogRepo(sessions)
 
     bot = Bot(token=settings.telegram_bot_token.get_secret_value())
     stack.push_async_callback(bot.session.close)
@@ -240,6 +248,22 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
         models=[spec.key for spec in runners.models],
     )
 
+    secretary = SecretaryService(
+        bot,
+        secretary_log,
+        runners,
+        usage,
+        media,
+        chats,
+        secretary_config,
+        prompt=secretary_prompt(),
+        allowed_users=settings.allowed_user_ids,
+        bot_id=me.id,
+        bot_name=me.first_name,
+        tz=settings.tz,
+    )
+    log.info("secretary mode: %s", "on" if secretary_config.enabled else "off")
+
     deps = Deps(
         settings=settings,
         me=me,
@@ -254,6 +278,7 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
         generations=GenerationRegistry(),
         bursts=BurstCollector(),
         models=tuple(runners.models),
+        secretary=secretary,
     )
     dispatcher = build_dispatcher(deps, bot)
     await setup_commands(bot)
@@ -261,14 +286,14 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
     background = [
         asyncio.create_task(scheduler.run()),
         asyncio.create_task(heartbeat(settings.heartbeat_path)),
-        asyncio.create_task(purge_chat_log(chat_log, settings.chat_log_retention_days)),
+        asyncio.create_task(purge_chat_log(chat_log, secretary_log, settings.chat_log_retention_days)),
     ]
     stack.push_async_callback(_stop, background)
     if settings.webhook_url:
 
         async def cron() -> dict[str, int]:
             fired = await scheduler.tick()
-            purged = await purge_old_chat_log(chat_log, settings.chat_log_retention_days)
+            purged = await purge_old_chat_log(chat_log, secretary_log, settings.chat_log_retention_days)
             return {"reminders": fired, "purged_messages": purged}
 
         token = settings.telegram_bot_token.get_secret_value()

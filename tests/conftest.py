@@ -17,6 +17,7 @@ from tgagent.storage.db import SessionFactory, create_engine, create_sessionmake
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 ROOT = Path(__file__).resolve().parents[1]
 TABLES = (
+    "secretary_messages",
     "usage_events",
     "reminders",
     "media_cache",

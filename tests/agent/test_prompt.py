@@ -1,7 +1,14 @@
 from pathlib import Path
 
 from tgagent.agent.models import CATALOG
-from tgagent.agent.prompt import STYLE_PROMPTS, SYSTEM_PROMPT, read_prompt, system_prompt
+from tgagent.agent.prompt import (
+    SECRETARY_PROMPT,
+    STYLE_PROMPTS,
+    SYSTEM_PROMPT,
+    read_prompt,
+    secretary_prompt,
+    system_prompt,
+)
 from tgagent.agent.tools import AgentOptions
 
 HAIKU = CATALOG["anthropic:claude-haiku-5-5"]
@@ -73,3 +80,16 @@ def test_the_repository_ships_working_fact_checking_rules() -> None:
     rules = read_prompt(REPO_PROMPTS / "fact-check.md")
 
     assert rules is not None and "Reuters" in rules
+
+
+def test_secretary_uses_the_built_in_prompt_by_default(tmp_path: Path) -> None:
+    (tmp_path / "secretary.md").write_text("<!-- write the prompt below -->\n", encoding="utf-8")
+
+    assert secretary_prompt() == SECRETARY_PROMPT
+    assert secretary_prompt(tmp_path) == SECRETARY_PROMPT
+
+
+def test_secretary_md_with_text_replaces_the_built_in_prompt(tmp_path: Path) -> None:
+    (tmp_path / "secretary.md").write_text("<!-- note -->\nAnswer only in English.\n", encoding="utf-8")
+
+    assert secretary_prompt(tmp_path) == "Answer only in English."
