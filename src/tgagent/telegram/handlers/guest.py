@@ -2,6 +2,7 @@ from aiogram import Bot, Router
 from aiogram.types import Message
 
 from tgagent.context.normalize import normalize
+from tgagent.i18n import lang_of
 from tgagent.services.turns import TurnRequest
 from tgagent.telegram.deps import Deps
 from tgagent.telegram.handlers.common import remember_user
@@ -26,5 +27,6 @@ async def on_guest_message(message: Message, bot: Bot, deps: Deps) -> None:
         trigger=normalize(message),
         reply_context=(normalize(parent),) if parent else (),
         options=deps.options(await deps.chats.get_settings(message.from_user.id)),
+        lang=lang_of(message.from_user.language_code),
     )
-    await deps.turns.run(request, GuestSink(bot, message.guest_query_id))
+    await deps.turns.run(request, GuestSink(bot, message.guest_query_id, lang=request.lang))

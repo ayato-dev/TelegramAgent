@@ -220,3 +220,19 @@ async def test_bots_never_get_denial_replies() -> None:
     )
 
     assert bot.calls == []
+
+
+async def test_default_denial_speaks_the_strangers_language() -> None:
+    from tests.telegram.fakes import FakeBot
+
+    bot = FakeBot()
+    middleware = AccessMiddleware(AccessPolicy(frozenset({1}), set()), no_leave, denied_text=None)
+    russian = User(id=3, is_bot=False, first_name="Ваня", language_code="ru")
+    english = User(id=4, is_bot=False, first_name="John", language_code="en")
+
+    for user in (russian, english):
+        update = Update(update_id=user.id, message=msg(Chat(id=user.id, type="private"), user))
+        await middleware(Recorder(), update, {"bot": bot.as_bot()})
+
+    texts = [p["text"] for name, p in bot.calls if name == "send_message"]
+    assert texts == ["Доступ к боту закрыт.", "This bot is private."]

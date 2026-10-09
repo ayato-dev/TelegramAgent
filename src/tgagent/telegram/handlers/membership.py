@@ -3,6 +3,7 @@ import logging
 from aiogram import Bot, F, Router
 from aiogram.types import ChatMemberUpdated, Message
 
+from tgagent.i18n import Lang, lang_of, t
 from tgagent.telegram.access import GROUP_TYPES
 from tgagent.telegram.deps import Deps
 
@@ -12,18 +13,10 @@ router = Router(name="membership")
 PRESENT = {"member", "administrator", "restricted"}
 
 
-def greeting(deps: Deps) -> str:
-    text = (
-        f"Привет! Я ИИ-агент. Упомяните меня (@{deps.username}) или ответьте на моё сообщение — "
-        "отвечу, поищу в интернете, посчитаю, расшифрую голосовое или поставлю напоминание.\n"
-        "Подсказка: ответьте на чужое сообщение с упоминанием, например «@"
-        f"{deps.username} это правда?», — я учту, о чём речь."
-    )
+def greeting(deps: Deps, lang: Lang) -> str:
+    text = t(lang, "group.hello", username=deps.username)
     if not deps.me.can_read_all_group_messages:
-        text += (
-            "\n\n⚠️ У меня включён privacy mode: я вижу только обращения ко мне, поэтому не смогу "
-            "пересказать обсуждение. Владелец может выключить его в @BotFather и добавить меня заново."
-        )
+        text += t(lang, "group.privacy")
     return text
 
 
@@ -41,7 +34,7 @@ async def handle_membership(event: ChatMemberUpdated, bot: Bot, deps: Deps) -> N
     if deps.policy.user_allowed(event.from_user.id):
         await deps.chats.set_allowed(chat.id, True, event.from_user.id)
         deps.policy.allow_chat(chat.id)
-        await bot.send_message(chat_id=chat.id, text=greeting(deps))
+        await bot.send_message(chat_id=chat.id, text=greeting(deps, lang_of(event.from_user.language_code)))
         return
     log.info("added to chat %s by non-allowed user %s, leaving", chat.id, event.from_user.id)
     await deps.chats.set_allowed(chat.id, False, event.from_user.id)

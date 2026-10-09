@@ -12,6 +12,7 @@ from aiogram.types import BufferedInputFile, InputRichMessage, Message, MessageE
 from telegramify_markdown import convert, split_entities
 
 from tgagent.agent.events import FileProduced
+from tgagent.i18n import DEFAULT_LANG, Lang, t
 
 log = logging.getLogger(__name__)
 
@@ -99,20 +100,21 @@ def _tail(text: str, size: int) -> str:
     return text if len(text) <= size else "…" + text[-size:]
 
 
-def compose_draft(answer: str, thinking: str | None, status: str | None) -> str:
+def compose_draft(answer: str, thinking: str | None, status: str | None, lang: Lang = DEFAULT_LANG) -> str:
     """Draft shown while generating: answer so far plus a ``<tg-thinking>`` progress block."""
     if not answer:
-        return _thinking_block(status or (_tail(thinking, THINKING_TAIL) if thinking else "Думаю…"))
+        placeholder = t(lang, "thinking.placeholder")
+        return _thinking_block(status or (_tail(thinking, THINKING_TAIL) if thinking else placeholder))
     if len(answer) > RICH_LIMIT:
         answer = "…\n\n" + answer[-RICH_LIMIT:]
     return f"{answer}\n\n{_thinking_block(status)}" if status else answer
 
 
-def compose_final(answer: str, thinking: str) -> str:
+def compose_final(answer: str, thinking: str, lang: Lang = DEFAULT_LANG) -> str:
     if not thinking.strip():
         return answer
     details = escape(thinking.strip(), quote=False)
-    return f"<details><summary>💭 Размышления</summary>\n\n{details}\n\n</details>\n\n{answer}"
+    return f"<details><summary>{t(lang, 'thinking')}</summary>\n\n{details}\n\n</details>\n\n{answer}"
 
 
 def entity_chunks(markdown: str) -> list[tuple[str, list[MessageEntity]]]:

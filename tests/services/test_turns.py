@@ -16,7 +16,8 @@ from tgagent.agent.tools import AgentOptions, ToolContext
 from tgagent.context.builder import ContentBuilder, TurnInput
 from tgagent.context.media import MediaService
 from tgagent.domain import NormalizedMessage
-from tgagent.services.turns import ATTACHMENT_TEXT, TurnRequest, TurnService
+from tgagent.i18n import t
+from tgagent.services.turns import TurnRequest, TurnService
 from tgagent.storage.db import SessionFactory
 from tgagent.storage.models import UsageEvent
 from tgagent.storage.repos import ChatLogRepo, Content, ConversationRepo, NodeRecord, UsageRepo
@@ -158,6 +159,7 @@ def private(trigger: NormalizedMessage, model: str | None = None) -> TurnRequest
         user_id=1,
         trigger=trigger,
         options=AgentOptions(model=model),
+        lang="ru",
     )
 
 
@@ -322,7 +324,7 @@ async def test_rejected_attachment_gets_a_clear_message(sessions: SessionFactory
 
     await service(sessions, ScriptedRunner([], error=error)).run(private(message(1, "что в файле?")), sink)
 
-    assert sink.failed == [ATTACHMENT_TEXT]
+    assert sink.failed == [t("ru", "error.bad_attachment")]
 
 
 async def test_changing_the_model_starts_a_fresh_private_conversation(sessions: SessionFactory) -> None:

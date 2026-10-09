@@ -10,7 +10,10 @@ from aiogram.types import (
     Message,
     TelegramObject,
     Update,
+    User,
 )
+
+from tgagent.i18n import lang_of, t
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +56,8 @@ class AccessMiddleware(BaseMiddleware):
     """Outer update middleware: drops everything the policy does not allow.
 
     Strangers get ``denied_text`` (at most once per ``cooldown`` seconds each, so spamming
-    the bot cannot get it flood-limited); an empty text keeps the bot silent.
+    the bot cannot get it flood-limited); ``None`` sends the default in their language and an
+    empty text keeps the bot silent.
     """
 
     def __init__(
@@ -61,7 +65,7 @@ class AccessMiddleware(BaseMiddleware):
         policy: AccessPolicy,
         leave_chat: Callable[[int], Awaitable[object]],
         *,
-        denied_text: str = "",
+        denied_text: str | None = "",
         cooldown: float = 10.0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -84,7 +88,7 @@ class AccessMiddleware(BaseMiddleware):
             return await handler(event, data)
         await self._leave_unknown_group(update)
         bot = data.get("bot")
-        if self._denied_text and bot is not None:
+        if self._denied_text != "" and bot is not None:
             try:
                 await self._deny(update, cast(Bot, bot))
             except Exception:
@@ -98,13 +102,19 @@ class AccessMiddleware(BaseMiddleware):
         self._last_denied[user_id] = now
         return True
 
+    def _text_for(self, user: User | None) -> str:
+        if self._denied_text is not None:
+            return self._denied_text
+        return t(lang_of(user.language_code if user else None), "access_denied")
+
     async def _deny(self, update: Update, bot: Bot) -> None:
-        text = self._denied_text
         if query := update.callback_query:
+            text = self._text_for(query.from_user)
             await bot.answer_callback_query(callback_query_id=query.id, text=text[:200])
             return
         if (guest := update.guest_message) and guest.guest_query_id and guest.from_user:
             if not guest.from_user.is_bot and self._cooled_down(guest.from_user.id):
+                text = self._text_for(guest.from_user)
                 content = InputTextMessageContent(message_text=text)
                 await bot.answer_guest_query(
                     guest_query_id=guest.guest_query_id,
@@ -121,7 +131,7 @@ class AccessMiddleware(BaseMiddleware):
             and not message.from_user.is_bot
             and self._cooled_down(message.from_user.id)
         ):
-            await bot.send_message(chat_id=message.chat.id, text=text)
+            await bot.send_message(chat_id=message.chat.id, text=self._text_for(message.from_user))
 
     def _allowed(self, update: Update) -> bool:
         policy = self._policy

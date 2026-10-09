@@ -6,6 +6,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, Message
 
+from tgagent.i18n import Lang, lang_of, t
 from tgagent.services.settings import toggle
 from tgagent.telegram.access import GROUP_TYPES
 from tgagent.telegram.deps import Deps
@@ -21,22 +22,9 @@ from tgagent.telegram.keyboards import (
 log = logging.getLogger(__name__)
 router = Router(name="commands")
 
-HELP = """\
-Я ИИ-агент. Что умею:
-• отвечать, рассуждать и считать (Python-песочница, графики и файлы);
-• искать в интернете и читать ссылки;
-• понимать фото, PDF и документы, расшифровывать голосовые и кружочки;
-• ставить напоминания и отложенные задания («через час проверь курс и напиши»);
-• выполнять задачи из чек-листов Telegram.
 
-В личке каждый топик — отдельный разговор, /new начинает новый. Ответ на моё старое сообщение \
-продолжает разговор с того места. Во время ответа можно нажать «Стоп».
-В группе упомяните меня или ответьте на моё сообщение.
-
-/settings — модель, глубина размышлений и инструменты, /usage — расходы."""
-
-
-NOT_ALLOWED = "Эта команда доступна только тем, кто управляет ботом."
+def language(message: Message) -> Lang:
+    return lang_of(message.from_user.language_code if message.from_user else None)
 
 
 def can_manage(message: Message, deps: Deps) -> bool:
@@ -50,30 +38,31 @@ def can_manage(message: Message, deps: Deps) -> bool:
 @router.message(Command("help"))
 async def on_help(message: Message, deps: Deps) -> None:
     await remember_user(message, deps)
-    await reply_privately(message, HELP)
+    await reply_privately(message, t(language(message), "help"))
 
 
 @router.message(Command("new"), F.chat.type == "private")
 async def on_new(message: Message, bot: Bot, deps: Deps) -> None:
-    chat_id = message.chat.id
+    chat_id, lang = message.chat.id, language(message)
     if deps.me.has_topics_enabled:
-        topic = await bot.create_forum_topic(chat_id=chat_id, name="Новый чат")
+        topic = await bot.create_forum_topic(chat_id=chat_id, name=t(lang, "new.topic_name"))
         await deps.conversations.create(chat_id, topic.message_thread_id, "private", title_pending=True)
         await bot.send_message(
             chat_id=chat_id,
-            text="Новый чат готов — пишите сюда 👇",
+            text=t(lang, "new.topic_ready"),
             message_thread_id=topic.message_thread_id,
         )
         return
     thread_id = message.message_thread_id if message.is_topic_message else None
     await deps.conversations.deactivate(chat_id, thread_id)
-    await message.answer("🆕 Начат новый разговор, прежний контекст больше не учитывается.")
+    await message.answer(t(lang, "new.started"))
 
 
 @router.message(Command("settings"))
 async def on_settings(message: Message, deps: Deps) -> None:
+    lang = language(message)
     if not can_manage(message, deps):
-        await reply_privately(message, NOT_ALLOWED)
+        await reply_privately(message, t(lang, "not_allowed"))
         return
     chat, user = message.chat, message.from_user
     await deps.chats.upsert(chat.id, chat.type, chat.title)
@@ -86,26 +75,28 @@ async def on_settings(message: Message, deps: Deps) -> None:
     model = deps.model(options)
     await reply_privately(
         message,
-        settings_text(options, model),
-        markup=settings_keyboard(options, model, pickable=len(deps.models) > 1),
+        settings_text(options, model, lang),
+        markup=settings_keyboard(options, model, pickable=len(deps.models) > 1, lang=lang),
     )
 
 
 @router.message(Command("usage"))
 async def on_usage(message: Message, deps: Deps) -> None:
+    lang = language(message)
     if not can_manage(message, deps):
-        await reply_privately(message, NOT_ALLOWED)
+        await reply_privately(message, t(lang, "not_allowed"))
         return
     chat_id = message.chat.id if message.chat.type in GROUP_TYPES else None
-    report = await deps.usage_report.render(chat_id=chat_id, now=datetime.now(UTC))
+    report = await deps.usage_report.render(chat_id=chat_id, now=datetime.now(UTC), lang=lang)
     await reply_privately(message, report, markdown=True)
 
 
 @router.callback_query(F.data.startswith(SETTINGS_PREFIX))
 async def on_settings_button(query: CallbackQuery, bot: Bot, deps: Deps) -> None:
     message = query.message
+    lang = lang_of(query.from_user.language_code)
     if not isinstance(message, Message):
-        await query.answer("Сообщение с настройками устарело, вызовите /settings ещё раз.")
+        await query.answer(t(lang, "settings.stale"))
         return
     chat_id, owner = message.chat.id, query.from_user.id
     action = (query.data or "").removeprefix(SETTINGS_PREFIX)
@@ -115,10 +106,10 @@ async def on_settings_button(query: CallbackQuery, bot: Bot, deps: Deps) -> None
         options = deps.options(await deps.chats.update_settings(owner, patch))
     model = deps.model(options)
     if action == "models":
-        text, markup = models_text(model), models_keyboard(deps.models, model.key)
+        text, markup = models_text(model, lang), models_keyboard(deps.models, model.key, lang)
     else:
-        text = settings_text(options, model)
-        markup = settings_keyboard(options, model, pickable=len(deps.models) > 1)
+        text = settings_text(options, model, lang)
+        markup = settings_keyboard(options, model, pickable=len(deps.models) > 1, lang=lang)
     try:
         if message.ephemeral_message_id:
             await bot.edit_ephemeral_message_text(
@@ -136,6 +127,6 @@ async def on_settings_button(query: CallbackQuery, bot: Bot, deps: Deps) -> None
         if "message is not modified" not in exc.message:
             log.warning("could not update settings message: %s", exc.message)
     if "model" in patch:
-        await query.answer(f"Модель: {model.label}. Следующее сообщение начнёт новый разговор.")
+        await query.answer(t(lang, "settings.model_chosen", label=model.label))
     else:
-        await query.answer("Сохранено" if patch else None)
+        await query.answer(t(lang, "settings.saved") if patch else None)

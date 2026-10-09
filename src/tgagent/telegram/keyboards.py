@@ -5,23 +5,19 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from tgagent.agent.models import ModelSpec
 from tgagent.agent.tools import AgentOptions
+from tgagent.i18n import DEFAULT_LANG, Lang, t
 
 SETTINGS_PREFIX = "set:"
-EFFORT_LABELS = {"low": "⚡ Быстро", "medium": "⚖️ Обычно", "high": "🧠 Глубоко"}
-FLAG_LABELS = {"show_thinking": "💭 Размышления", "web": "🌐 Веб-поиск", "code": "🐍 Код"}
+EFFORTS = ("low", "medium", "high")
 BADGES = (("vision", "👁"), ("native_audio", "🎙"), ("web", "🌐"), ("code", "🐍"), ("image_out", "🎨"))
-BADGE_LEGEND = (
-    "👁 видит картинки · 🎙 сама слушает голосовые и смотрит YouTube · 🌐 ищет в интернете · "
-    "🐍 запускает код · 🎨 рисует картинки · 🆓 бесплатный тариф"
-)
 
 ButtonStyle = Literal["success", "danger"]
 
 
-def _flag(name: str, enabled: bool) -> InlineKeyboardButton:
+def _flag(name: str, enabled: bool, lang: Lang) -> InlineKeyboardButton:
     style: ButtonStyle = "success" if enabled else "danger"
     return InlineKeyboardButton(
-        text=f"{FLAG_LABELS[name]}: {'вкл' if enabled else 'выкл'}",
+        text=f"{t(lang, f'flag.{name}')}: {t(lang, 'on' if enabled else 'off')}",
         callback_data=f"{SETTINGS_PREFIX}{name}",
         style=style,
     )
@@ -32,7 +28,9 @@ def model_badges(spec: ModelSpec) -> str:
     return badges + ("🆓" if spec.free else "")
 
 
-def models_keyboard(models: Sequence[ModelSpec], current: str) -> InlineKeyboardMarkup:
+def models_keyboard(
+    models: Sequence[ModelSpec], current: str, lang: Lang = DEFAULT_LANG
+) -> InlineKeyboardMarkup:
     rows = [
         [
             InlineKeyboardButton(
@@ -43,27 +41,24 @@ def models_keyboard(models: Sequence[ModelSpec], current: str) -> InlineKeyboard
         ]
         for position, spec in enumerate(models)
     ]
-    rows.append([InlineKeyboardButton(text="‹ Назад", callback_data=f"{SETTINGS_PREFIX}back")])
+    rows.append([InlineKeyboardButton(text=t(lang, "back"), callback_data=f"{SETTINGS_PREFIX}back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def models_text(current: ModelSpec) -> str:
-    return (
-        f"🤖 Сейчас: {current.label}\n\n"
-        "Выберите модель. В личке смена модели начинает новый разговор, "
-        "ответы на старые сообщения продолжаются в их модели.\n\n"
-        f"{BADGE_LEGEND}"
-    )
+def models_text(current: ModelSpec, lang: Lang = DEFAULT_LANG) -> str:
+    return t(lang, "models.text", label=current.label, badges=t(lang, "badges"))
 
 
-def settings_keyboard(options: AgentOptions, model: ModelSpec, *, pickable: bool) -> InlineKeyboardMarkup:
+def settings_keyboard(
+    options: AgentOptions, model: ModelSpec, *, pickable: bool, lang: Lang = DEFAULT_LANG
+) -> InlineKeyboardMarkup:
     efforts = [
         InlineKeyboardButton(
-            text=label,
+            text=t(lang, f"effort.{level}"),
             callback_data=f"{SETTINGS_PREFIX}effort:{level}",
             style="success" if options.effort == level else None,
         )
-        for level, label in EFFORT_LABELS.items()
+        for level in EFFORTS
     ]
     picker = [
         [
@@ -76,11 +71,11 @@ def settings_keyboard(options: AgentOptions, model: ModelSpec, *, pickable: bool
         inline_keyboard=[
             *(picker if pickable else []),
             efforts,
-            [_flag("show_thinking", options.show_thinking)],
-            [_flag("web", options.web), _flag("code", options.code)],
+            [_flag("show_thinking", options.show_thinking, lang)],
+            [_flag("web", options.web, lang), _flag("code", options.code, lang)],
             [
                 InlineKeyboardButton(
-                    text="😈 Стиль: дерзкий" if options.style == "troll" else "🙂 Стиль: обычный",
+                    text=t(lang, "style.troll" if options.style == "troll" else "style.normal"),
                     callback_data=f"{SETTINGS_PREFIX}style",
                 )
             ],
@@ -88,12 +83,6 @@ def settings_keyboard(options: AgentOptions, model: ModelSpec, *, pickable: bool
     )
 
 
-def settings_text(options: AgentOptions, model: ModelSpec) -> str:
-    return (
-        "⚙️ Твои настройки — действуют в личке, в группах и в гостевом режиме\n\n"
-        f"Модель: {model.label} {model_badges(model)}\n"
-        f"Глубина: {EFFORT_LABELS[options.effort]} — сколько модель размышляет перед ответом.\n"
-        "Размышления: показывать ход мыслей (в стриме и свёрнутым блоком в ответе).\n"
-        "Веб-поиск и код: инструменты агента — поиск в интернете и Python-песочница.\n"
-        "Стиль: обычный или дерзкий (с матом и подъёбами)."
-    )
+def settings_text(options: AgentOptions, model: ModelSpec, lang: Lang = DEFAULT_LANG) -> str:
+    label = f"{model.label} {model_badges(model)}".strip()
+    return t(lang, "settings.text", model=label, effort=t(lang, f"effort.{options.effort}"))

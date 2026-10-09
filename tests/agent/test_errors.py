@@ -81,3 +81,16 @@ def test_provider_errors_pass_through() -> None:
     original = ProviderError("quota", "no money")
 
     assert classify(original) is original
+
+
+def test_error_texts_follow_the_language() -> None:
+    from tgagent.i18n import t
+    from tgagent.services.turns import error_text
+
+    limited = ProviderError("rate_limited", "x", retry_after=20)
+
+    assert error_text(limited, "en").endswith("Try again in 20 s.")
+    assert error_text(limited, "ru").endswith("Попробуйте через 20 с.")
+    assert error_text(ProviderError("rate_limited", "x"), "en").endswith("Try again in a minute.")
+    assert error_text(ProviderError("other", "x"), "en") == t("en", "failure")
+    assert error_text(ProviderError("quota", "x"), "ru") == t("ru", "error.quota")

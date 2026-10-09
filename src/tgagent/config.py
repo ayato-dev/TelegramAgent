@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     groq_api_key: SecretStr | None = None
 
     allowed_user_ids: Annotated[frozenset[int], NoDecode] = frozenset()
-    # Reply to people outside the whitelist; empty keeps the bot silent.
-    access_denied_text: str = "Доступ к боту закрыт."
+    # Reply to people outside the whitelist: unset = a default in their language, empty = silence.
+    access_denied_text: str | None = None
 
     # Deprecated: ANTHROPIC_MODEL=x is read as DEFAULT_MODEL=anthropic:x.
     anthropic_model: str | None = None

@@ -15,6 +15,7 @@ from tgagent.agent.registry import ProviderRegistry
 from tgagent.agent.tools import AgentOptions, ToolContext
 from tgagent.context.builder import TurnInput
 from tgagent.domain import NormalizedMessage
+from tgagent.i18n import DEFAULT_LANG, Lang, t
 from tgagent.storage.repos import (
     ChatLogRepo,
     ConversationKind,
@@ -28,25 +29,6 @@ from tgagent.telegram.sinks import ResponseSink
 
 log = logging.getLogger(__name__)
 
-FAILURE_TEXT = "⚠️ Не удалось получить ответ. Попробуйте ещё раз чуть позже."
-REFUSAL_TEXT = "Не могу помочь с этим запросом."
-ATTACHMENT_TEXT = (
-    "⚠️ Не смог прочитать вложение: такой формат файла модель не принимает. Пришлите PDF, текст или картинку."
-)
-ERROR_TEXTS = {
-    "rate_limited": "⏳ Модель сейчас упёрлась в лимит запросов (на бесплатных тарифах он маленький). "
-    "Попробуйте через минуту.",
-    "quota": "💳 У провайдера модели закончились деньги или квота. Пополните баланс или выберите "
-    "другую модель в /settings.",
-    "region": "🌍 Провайдер этой модели не работает в регионе сервера бота. "
-    "Выберите другую модель в /settings.",
-    "auth": "🔑 Провайдер не принял API-ключ. Владельцу бота стоит проверить ключи в .env.",
-    "too_long": "📚 Разговор стал слишком длинным для этой модели. Начните новый: /new.",
-    "bad_attachment": ATTACHMENT_TEXT,
-    "unavailable": "⚠️ Сервис модели сейчас недоступен или перегружен. Попробуйте ещё раз чуть позже.",
-    "other": FAILURE_TEXT,
-}
-STOPPED_SUFFIX = "\n\n_⏹ Остановлено_"
 SUMMARY_PROMPT = (
     "Below is a conversation between a user and you, an AI assistant in Telegram. Summarise it so the "
     "conversation can go on without the full history: keep facts, names, numbers, dates, decisions, the "
@@ -55,18 +37,24 @@ SUMMARY_PROMPT = (
 )
 SUMMARY_MAX_TOKENS = 2_000
 KIND_LABELS = {
-    "private": "личный чат",
-    "group": "группа",
-    "guest": "чужой чат (гостевой вызов)",
-    "reminder": "личный чат",
+    "private": "private chat",
+    "group": "group",
+    "guest": "someone else's chat (guest call)",
+    "reminder": "private chat",
 }
 
 
-def error_text(error: ProviderError) -> str:
-    text = ERROR_TEXTS[error.kind]
-    if error.kind == "rate_limited" and error.retry_after:
-        text = text.replace("через минуту", f"через {max(1, round(error.retry_after))} с")
-    return text
+def error_text(error: ProviderError, lang: Lang = DEFAULT_LANG) -> str:
+    if error.kind == "other":
+        return t(lang, "failure")
+    if error.kind == "rate_limited":
+        wait = (
+            t(lang, "wait.seconds", seconds=max(1, round(error.retry_after)))
+            if error.retry_after
+            else t(lang, "wait.minute")
+        )
+        return t(lang, "error.rate_limited", wait=wait)
+    return t(lang, f"error.{error.kind}")
 
 
 type TitleCallback = Callable[[ConversationRecord, str, str], Coroutine[None, None, None]]
@@ -84,6 +72,7 @@ class TurnRequest:
     album: Sequence[NormalizedMessage] = ()
     options: AgentOptions = field(default_factory=AgentOptions)
     title_pending: bool = False
+    lang: Lang = DEFAULT_LANG
 
     @property
     def include_author(self) -> bool:
@@ -101,7 +90,7 @@ class TurnService:
         chat_log: ChatLogRepo,
         *,
         tz: ZoneInfo,
-        bot_name: str = "бот",
+        bot_name: str = "bot",
         on_title: TitleCallback | None = None,
     ) -> None:
         self._runners = runners
@@ -250,7 +239,7 @@ class TurnService:
         except Exception as exc:
             error = classify(exc)
             log.exception("agent turn failed in chat %s (%s)", request.chat_id, error.kind)
-            await sink.fail(error_text(error))
+            await sink.fail(error_text(error, request.lang))
             return
 
         assert result is not None
@@ -265,13 +254,15 @@ class TurnService:
         await self._record_usage(request, runner, result)
         await self._conversations.set_prompt_tokens(conversation.id, result.usage.last_prompt_tokens)
         if result.refused or not result.nodes:
-            await sink.fail(REFUSAL_TEXT)
+            await sink.fail(t(request.lang, "refusal"))
             return
 
         ids = await self._conversations.add_nodes(conversation.id, user_node, result.nodes)
-        markdown = compose_final(result.text, result.thinking if request.options.show_thinking else "")
+        markdown = compose_final(
+            result.text, result.thinking if request.options.show_thinking else "", request.lang
+        )
         if not markdown.strip():
-            markdown = "Готово." if files else "…"
+            markdown = t(request.lang, "done") if files else "…"
         await self._deliver(request, conversation, ids[-1], markdown, result.text, files, sink)
         if result.container:
             await self._conversations.set_container(
@@ -327,12 +318,13 @@ class TurnService:
     ) -> None:
         """User pressed Stop: keep only the visible text so the history stays valid."""
         if not partial:
-            await sink.fail("⏹ Остановлено")
+            await sink.fail(t(request.lang, "stopped"))
             return
         node_id = await self._conversations.add_node(
             conversation.id, user_node, "assistant", [{"type": "text", "text": partial}]
         )
-        await self._deliver(request, conversation, node_id, partial + STOPPED_SUFFIX, partial, files, sink)
+        stopped = f"{partial}\n\n_{t(request.lang, 'stopped')}_"
+        await self._deliver(request, conversation, node_id, stopped, partial, files, sink)
 
     async def _record_usage(self, request: TurnRequest, runner: LLMRunner, result: TurnResult) -> None:
         usage = result.usage

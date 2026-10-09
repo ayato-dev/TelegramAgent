@@ -26,7 +26,7 @@ def by_data(markup: InlineKeyboardMarkup) -> dict[str, tuple[str, str | None]]:
 
 
 def buttons(options: AgentOptions) -> dict[str, tuple[str, str | None]]:
-    return by_data(settings_keyboard(options, HAIKU, pickable=True))
+    return by_data(settings_keyboard(options, HAIKU, pickable=True, lang="ru"))
 
 
 def test_selected_effort_is_highlighted() -> None:
@@ -45,7 +45,7 @@ def test_flags_show_state() -> None:
 
 
 def test_settings_text_mentions_scope_and_model() -> None:
-    text = settings_text(AgentOptions(), HAIKU)
+    text = settings_text(AgentOptions(), HAIKU, "ru")
 
     assert "в группах" in text
     assert "Claude Haiku 5.5" in text
@@ -75,3 +75,11 @@ def test_badges_show_capabilities() -> None:
 def test_style_button_shows_current_style() -> None:
     assert buttons(AgentOptions())[f"{SETTINGS_PREFIX}style"][0] == "🙂 Стиль: обычный"
     assert buttons(AgentOptions(style="troll"))[f"{SETTINGS_PREFIX}style"][0] == "😈 Стиль: дерзкий"
+
+
+def test_settings_in_english() -> None:
+    markup = by_data(settings_keyboard(AgentOptions(web=False), HAIKU, pickable=True, lang="en"))
+
+    assert markup[f"{SETTINGS_PREFIX}web"][0] == "🌐 Web search: off"
+    assert markup[f"{SETTINGS_PREFIX}style"][0] == "🙂 Style: normal"
+    assert settings_text(AgentOptions(), HAIKU, "en").startswith("⚙️ Your settings")

@@ -18,6 +18,11 @@ class UserRepo:
             stmt = insert(session, User).values(id=user_id, **values)
             await session.execute(stmt.on_conflict_do_update(index_elements=[User.id], set_=values))
 
+    async def language(self, user_id: int) -> str | None:
+        """The language code of the person's Telegram app, as last seen."""
+        async with self._sessions() as session:
+            return await session.scalar(select(User.language_code).where(User.id == user_id))
+
     async def names(self, user_ids: list[int]) -> dict[int, str]:
         if not user_ids:
             return {}

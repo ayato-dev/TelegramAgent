@@ -3,6 +3,7 @@ from aiogram.types import Message
 
 from tgagent.context.normalize import normalize
 from tgagent.domain import NormalizedMessage
+from tgagent.i18n import lang_of
 from tgagent.services.turns import TurnRequest
 from tgagent.telegram.access import GROUP_TYPES
 from tgagent.telegram.bursts import pick_trigger
@@ -56,7 +57,10 @@ async def on_group_message(message: Message, bot: Bot, deps: Deps) -> None:
         reply_context=await reply_context(trigger, deps),
         album=tuple(normalize(m) for m in rest),
         options=deps.options(await deps.chats.get_settings(user.id)),
+        lang=lang_of(user.language_code),
     )
-    sink = TypingSink(bot, message.chat.id, normalized.thread_id, reply_to=trigger.message_id)
+    sink = TypingSink(
+        bot, message.chat.id, normalized.thread_id, reply_to=trigger.message_id, lang=request.lang
+    )
     async with deps.locks.hold(message.chat.id):
         await deps.turns.run(request, sink)

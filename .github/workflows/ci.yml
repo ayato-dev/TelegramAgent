@@ -138,7 +138,7 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           ALLOWED_USER_IDS: ${{ vars.ALLOWED_USER_IDS }}
-          ACCESS_DENIED_TEXT: ${{ vars.ACCESS_DENIED_TEXT || 'Доступ к боту закрыт.' }}
+          ACCESS_DENIED_TEXT: ${{ vars.ACCESS_DENIED_TEXT }}
           TIMEZONE: ${{ vars.TIMEZONE || 'Europe/Moscow' }}
           DEFAULT_EFFORT: ${{ vars.DEFAULT_EFFORT || 'medium' }}
           COMPACTION_TRIGGER_TOKENS: ${{ vars.COMPACTION_TRIGGER_TOKENS || '100000' }}
@@ -153,7 +153,8 @@ jobs:
                         ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY DEEPSEEK_API_KEY GROQ_API_KEY \
                         DEFAULT_MODEL GROQ_PAID_TIER GEMINI_PAID_TIER \
                         ALLOWED_USER_IDS ACCESS_DENIED_TEXT TIMEZONE DEFAULT_EFFORT COMPACTION_TRIGGER_TOKENS WHISPER_MODEL; do
-              printf '%s=%s\n' "$name" "${!name}"
+              # Unset variables stay out of .env, so the bot's own defaults apply.
+              if [ -n "${!name}" ]; then printf '%s=%s\n' "$name" "${!name}"; fi
             done
           } > "$DEPLOY_DIR/.env"
 

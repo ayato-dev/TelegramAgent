@@ -1,21 +1,27 @@
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
 
+from tgagent.i18n import Lang, t
 from tgagent.telegram.access import AccessMiddleware
 from tgagent.telegram.deps import Deps
 from tgagent.telegram.handlers import commands, groups, guest, membership, private
 
-PRIVATE_COMMANDS = [
-    BotCommand(command="new", description="Новый разговор"),
-    BotCommand(command="settings", description="Модель, глубина размышлений и инструменты"),
-    BotCommand(command="usage", description="Расходы на API"),
-    BotCommand(command="help", description="Что я умею"),
-]
-GROUP_COMMANDS = [
-    BotCommand(command="settings", description="Твои настройки агента", is_ephemeral=True),
-    BotCommand(command="usage", description="Расходы этого чата", is_ephemeral=True),
-    BotCommand(command="help", description="Что я умею", is_ephemeral=True),
-]
+
+def private_commands(lang: Lang) -> list[BotCommand]:
+    return [
+        BotCommand(command="new", description=t(lang, "command.new")),
+        BotCommand(command="settings", description=t(lang, "command.settings")),
+        BotCommand(command="usage", description=t(lang, "command.usage")),
+        BotCommand(command="help", description=t(lang, "command.help")),
+    ]
+
+
+def group_commands(lang: Lang) -> list[BotCommand]:
+    return [
+        BotCommand(command="settings", description=t(lang, "command.settings_group"), is_ephemeral=True),
+        BotCommand(command="usage", description=t(lang, "command.usage_group"), is_ephemeral=True),
+        BotCommand(command="help", description=t(lang, "command.help"), is_ephemeral=True),
+    ]
 
 
 def build_dispatcher(deps: Deps, bot: Bot) -> Dispatcher:
@@ -39,5 +45,12 @@ def build_dispatcher(deps: Deps, bot: Bot) -> Dispatcher:
 
 
 async def setup_commands(bot: Bot) -> None:
-    await bot.set_my_commands(PRIVATE_COMMANDS, scope=BotCommandScopeAllPrivateChats())
-    await bot.set_my_commands(GROUP_COMMANDS, scope=BotCommandScopeAllGroupChats())
+    """English for everyone, Russian for Russian-language Telegram apps."""
+    languages: tuple[tuple[Lang, str | None], ...] = (("en", None), ("ru", "ru"))
+    for lang, language_code in languages:
+        await bot.set_my_commands(
+            private_commands(lang), scope=BotCommandScopeAllPrivateChats(), language_code=language_code
+        )
+        await bot.set_my_commands(
+            group_commands(lang), scope=BotCommandScopeAllGroupChats(), language_code=language_code
+        )

@@ -94,16 +94,24 @@ class FakeTurns:
 
 
 class FakeUsers:
+    def __init__(self, language: str | None = "ru") -> None:
+        self._language = language
+
     async def names(self, user_ids: list[int]) -> dict[int, str]:
         return {1: "Аня"}
 
+    async def language(self, user_id: int) -> str | None:
+        return self._language
 
-def delivery(bot: FakeBot, turns: FakeTurns, chats: FakeChats | None = None) -> ReminderDelivery:
+
+def delivery(
+    bot: FakeBot, turns: FakeTurns, chats: FakeChats | None = None, users: FakeUsers | None = None
+) -> ReminderDelivery:
     return ReminderDelivery(
         bot.as_bot(),
         cast(TurnService, turns),
         cast(ChatRepo, chats or FakeChats()),
-        cast(UserRepo, FakeUsers()),
+        cast(UserRepo, users or FakeUsers()),
         default_effort="medium",
         clock=lambda: NOW,
     )
@@ -206,3 +214,12 @@ async def test_group_answers_use_the_settings_of_who_asked() -> None:
 
     request, _ = turns.requests[0]
     assert request.options.style == "troll"
+
+
+async def test_reminder_speaks_its_authors_language() -> None:
+    bot, turns = FakeBot(), FakeTurns()
+    record = ReminderRecord(1, 7, None, 7, NOW, "call mum", "notify", "running")
+
+    await delivery(bot, turns, users=FakeUsers("en"))(record)
+
+    assert bot.last("send_rich_message")["markdown"].startswith("⏰ **Reminder**")

@@ -92,3 +92,7 @@ class FakeBot:
     async def send_chat_action(self, chat_id: int, action: str, **kw: Any) -> bool:
         self._record("send_chat_action", {"chat_id": chat_id, "action": action, **kw})
         return True
+
+    async def set_my_commands(self, commands: list[Any], **kw: Any) -> bool:
+        self._record("set_my_commands", {"commands": commands, **kw})
+        return True

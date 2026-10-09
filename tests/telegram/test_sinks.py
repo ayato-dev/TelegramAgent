@@ -4,7 +4,7 @@ from aiogram.types import InputRichMessageContent, InputTextMessageContent
 
 from tests.telegram.fakes import FakeBot
 from tgagent.agent.events import FileProduced, TextDelta, ToolStarted
-from tgagent.telegram.sinks import DraftSink, GuestSink, PlainSink, TypingSink
+from tgagent.telegram.sinks import DraftSink, GuestSink, PlainSink, TypingSink, tool_status
 
 
 async def test_draft_sink_streams_coalesced_drafts_then_persists() -> None:
@@ -28,7 +28,7 @@ async def test_draft_sink_streams_coalesced_drafts_then_persists() -> None:
 
 async def test_draft_shows_tool_status() -> None:
     bot = FakeBot()
-    sink = DraftSink(bot.as_bot(), chat_id=5, thread_id=None, interval=0.01)
+    sink = DraftSink(bot.as_bot(), chat_id=5, thread_id=None, lang="ru", interval=0.01)
 
     await sink.start()
     await sink.on_event(ToolStarted("web_search", "курс евро"))
@@ -160,3 +160,11 @@ async def test_guest_sink_falls_back_to_text_content() -> None:
     content = calls[-1].input_message_content  # type: ignore[attr-defined]
     assert isinstance(content, InputTextMessageContent)
     assert content.message_text == "Ответ"
+
+
+def test_tool_status_speaks_the_users_language() -> None:
+    search = ToolStarted("web_search", "курс евро")
+
+    assert tool_status(search, "en") == "🔎 Searching: курс евро"
+    assert tool_status(search, "ru") == "🔎 Ищу: курс евро"
+    assert tool_status(ToolStarted("mystery", ""), "en") == "🛠 mystery…"

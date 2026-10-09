@@ -113,7 +113,7 @@ class FakeUsers:
 async def test_usage_report_renders_periods_and_top_users() -> None:
     report = UsageReport(cast(UsageRepo, FakeTotals()), cast(UserRepo, FakeUsers()), ZoneInfo("UTC"))
 
-    text = await report.render(chat_id=None, now=datetime(2026, 10, 8, 12, tzinfo=UTC))
+    text = await report.render(chat_id=None, now=datetime(2026, 10, 8, 12, tzinfo=UTC), lang="ru")
 
     assert "| Сегодня | 4 |" in text
     assert "$0.1235" in text
@@ -124,6 +124,15 @@ async def test_usage_report_renders_periods_and_top_users() -> None:
 async def test_group_usage_report_has_no_top_users() -> None:
     report = UsageReport(cast(UsageRepo, FakeTotals()), cast(UserRepo, FakeUsers()), ZoneInfo("UTC"))
 
-    text = await report.render(chat_id=-100, now=datetime(2026, 10, 8, 12, tzinfo=UTC))
+    text = await report.render(chat_id=-100, now=datetime(2026, 10, 8, 12, tzinfo=UTC), lang="ru")
 
     assert "Аня" not in text
+
+
+async def test_usage_report_in_english() -> None:
+    report = UsageReport(cast(UsageRepo, FakeTotals()), cast(UserRepo, FakeUsers()), ZoneInfo("UTC"))
+
+    text = await report.render(chat_id=None, now=datetime(2026, 10, 8, 12, tzinfo=UTC), lang="en")
+
+    assert text.startswith("## Spending")
+    assert "| Today | 4 |" in text

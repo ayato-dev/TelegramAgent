@@ -2,6 +2,7 @@ from aiogram import Bot, F, Router
 from aiogram.types import Message, MessageGenerationStopped
 
 from tgagent.context.normalize import normalize
+from tgagent.i18n import lang_of
 from tgagent.services.turns import TurnRequest
 from tgagent.telegram.deps import Deps
 from tgagent.telegram.handlers.common import SUPPORTED_CONTENT, remember_user, run_with_stop
@@ -47,8 +48,9 @@ async def on_private_message(message: Message, bot: Bot, deps: Deps) -> None:
         reply_context=reply_context,
         album=tuple(normalize(m) for m in batch[1:]),
         options=deps.options(await deps.chats.get_settings(first.chat.id)),
+        lang=lang_of(first.from_user.language_code),
     )
-    sink = DraftSink(bot, first.chat.id, trigger.thread_id)
+    sink = DraftSink(bot, first.chat.id, trigger.thread_id, lang=request.lang)
     async with deps.locks.hold((first.chat.id, trigger.thread_id)):
         await run_with_stop(deps, request, sink)
 

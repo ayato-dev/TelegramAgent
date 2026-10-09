@@ -19,6 +19,7 @@ from aiogram.types import (
 )
 
 from tgagent.agent.events import AgentEvent, FileProduced, TextDelta, ThinkingDelta, ToolStarted
+from tgagent.i18n import DEFAULT_LANG, TEXTS, Lang, t
 from tgagent.telegram.render import (
     RICH_LIMIT,
     TEXT_LIMIT,
@@ -32,24 +33,10 @@ from tgagent.telegram.render import (
 
 log = logging.getLogger(__name__)
 
-TOOL_LABELS = {
-    "web_search": "🔎 Ищу",
-    "web_fetch": "🌐 Читаю",
-    "code_execution": "🐍 Считаю",
-    "bash_code_execution": "🐍 Выполняю код",
-    "text_editor_code_execution": "📝 Работаю с файлом",
-    "compaction": "🗜 Сжимаю историю",
-    "set_reminder": "⏰ Ставлю напоминание",
-    "list_reminders": "⏰ Смотрю напоминания",
-    "cancel_reminder": "⏰ Отменяю напоминание",
-    "read_chat_history": "📜 Читаю чат",
-    "create_poll": "📊 Создаю опрос",
-    "reply_to_checklist_task": "✅ Отчитываюсь по задаче",
-}
 
-
-def tool_status(event: ToolStarted) -> str:
-    label = TOOL_LABELS.get(event.name, f"🛠 {event.name}")
+def tool_status(event: ToolStarted, lang: Lang = DEFAULT_LANG) -> str:
+    key = f"tool.{event.name}"
+    label = t(lang, key) if key in TEXTS else f"🛠 {event.name}"
     return f"{label}: {event.summary}" if event.summary else f"{label}…"
 
 
@@ -67,6 +54,7 @@ class ResponseSink(Protocol):
 
 @dataclass(slots=True)
 class StreamState:
+    lang: Lang = DEFAULT_LANG
     answer: str = ""
     thinking: str = ""
     status: str | None = None
@@ -79,7 +67,7 @@ class StreamState:
             case ThinkingDelta(text=text):
                 self.thinking += text
             case ToolStarted():
-                self.status = tool_status(event)
+                self.status = tool_status(event, self.lang)
             case _:
                 return False
         return True
@@ -127,13 +115,20 @@ class DraftSink:
     """Private chats: native streaming drafts with a Stop button, then a persisted message."""
 
     def __init__(
-        self, bot: Bot, chat_id: int, thread_id: int | None, *, interval: float = 0.6, keepalive: float = 10.0
+        self,
+        bot: Bot,
+        chat_id: int,
+        thread_id: int | None,
+        *,
+        lang: Lang = DEFAULT_LANG,
+        interval: float = 0.6,
+        keepalive: float = 10.0,
     ) -> None:
         self._bot = bot
         self._chat_id = chat_id
         self._thread_id = thread_id
         self.draft_id = secrets.randbelow(2**31 - 2) + 1
-        self._state = StreamState()
+        self._state = StreamState(lang)
         self._rich = True
         self._ticker = Ticker(self._flush, interval, keepalive)
 
@@ -152,7 +147,7 @@ class DraftSink:
                     chat_id=self._chat_id,
                     draft_id=self.draft_id,
                     rich_message=InputRichMessage(
-                        markdown=compose_draft(state.answer, state.thinking, state.status)
+                        markdown=compose_draft(state.answer, state.thinking, state.status, state.lang)
                     ),
                     message_thread_id=self._thread_id,
                     can_stop=True,
@@ -193,12 +188,14 @@ class TypingSink:
         thread_id: int | None,
         reply_to: int | None,
         *,
+        lang: Lang = DEFAULT_LANG,
         typing_interval: float = 4.5,
     ) -> None:
         self._bot = bot
         self._chat_id = chat_id
         self._thread_id = thread_id
         self._reply_to = reply_to
+        self._lang = lang
         self._typing = Ticker(self._send_typing, typing_interval, typing_interval)
 
     async def _send_typing(self) -> None:
@@ -215,7 +212,7 @@ class TypingSink:
     async def finish(self, markdown: str, files: Sequence[FileProduced]) -> list[int]:
         await self._typing.stop()
         ids: list[int] = []
-        for chunk in split_markdown(markdown, RICH_LIMIT) or ["Готово."]:
+        for chunk in split_markdown(markdown, RICH_LIMIT) or [t(self._lang, "done")]:
             reply_to = ids[-1] if ids else self._reply_to
             sent = await send_markdown(
                 self._bot, self._chat_id, chunk, thread_id=self._thread_id, reply_to=reply_to
@@ -239,9 +236,10 @@ class TypingSink:
 class GuestSink:
     """Guest mode: exactly one reply via answerGuestQuery, so nothing streams."""
 
-    def __init__(self, bot: Bot, guest_query_id: str) -> None:
+    def __init__(self, bot: Bot, guest_query_id: str, *, lang: Lang = DEFAULT_LANG) -> None:
         self._bot = bot
         self._query_id = guest_query_id
+        self._lang = lang
 
     async def start(self) -> None:
         return None
@@ -254,18 +252,22 @@ class GuestSink:
         content = InputTextMessageContent(message_text=text, entities=entities, parse_mode=None)
         await self._bot.answer_guest_query(
             guest_query_id=self._query_id,
-            result=InlineQueryResultArticle(id="answer", title="Ответ", input_message_content=content),
+            result=InlineQueryResultArticle(
+                id="answer", title=t(self._lang, "guest.title"), input_message_content=content
+            ),
         )
 
     async def finish(self, markdown: str, files: Sequence[FileProduced]) -> list[int]:
         if files:
-            markdown += "\n\n_Файлы из этого ответа можно получить в личном чате с ботом._"
+            markdown += "\n\n" + t(self._lang, "guest.files")
         chunk = (split_markdown(markdown, RICH_LIMIT) or ["…"])[0]
         content = InputRichMessageContent(rich_message=InputRichMessage(markdown=chunk))
         try:
             await self._bot.answer_guest_query(
                 guest_query_id=self._query_id,
-                result=InlineQueryResultArticle(id="answer", title="Ответ", input_message_content=content),
+                result=InlineQueryResultArticle(
+                    id="answer", title=t(self._lang, "guest.title"), input_message_content=content
+                ),
             )
         except TelegramBadRequest as exc:
             log.info("rich guest answer rejected (%s), answering with text", exc.message)

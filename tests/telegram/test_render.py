@@ -37,7 +37,8 @@ def test_oversized_code_block_is_split_with_fences_reopened() -> None:
 
 
 def test_draft_placeholder_status_and_thinking() -> None:
-    assert compose_draft("", None, None) == "<tg-thinking>Думаю…</tg-thinking>"
+    assert compose_draft("", None, None, "ru") == "<tg-thinking>Думаю…</tg-thinking>"
+    assert compose_draft("", None, None, "en") == "<tg-thinking>Thinking…</tg-thinking>"
     assert compose_draft("", None, "🔎 Ищу: курс") == "<tg-thinking>🔎 Ищу: курс</tg-thinking>"
     assert compose_draft("", "a < b", None) == "<tg-thinking>a &lt; b</tg-thinking>"
     assert compose_draft("Ответ", None, "🐍 Считаю") == "Ответ\n\n<tg-thinking>🐍 Считаю</tg-thinking>"
@@ -45,7 +46,7 @@ def test_draft_placeholder_status_and_thinking() -> None:
 
 def test_final_includes_collapsed_thinking_when_present() -> None:
     assert compose_final("Ответ", "") == "Ответ"
-    assert compose_final("Ответ", "x<y") == (
+    assert compose_final("Ответ", "x<y", "ru") == (
         "<details><summary>💭 Размышления</summary>\n\nx&lt;y\n\n</details>\n\nОтвет"
     )
 

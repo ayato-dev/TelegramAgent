@@ -5,6 +5,7 @@ from aiogram import Bot
 
 from tgagent.config import Effort
 from tgagent.domain import NormalizedMessage
+from tgagent.i18n import lang_of, t
 from tgagent.services.reminders import utc_now
 from tgagent.services.settings import options_from
 from tgagent.services.turns import TurnRequest, TurnService
@@ -42,9 +43,10 @@ class ReminderDelivery:
             await self._run_task(item)
 
     async def _notify(self, item: ReminderRecord) -> None:
-        text = f"⏰ **Напоминание**\n\n{item.text}"
+        lang = lang_of(await self._users.language(item.user_id))
+        text = f"{t(lang, 'reminder')}\n\n{item.text}"
         if item.chat_id != item.user_id:
-            name = (await self._users.names([item.user_id])).get(item.user_id, "напоминание")
+            name = (await self._users.names([item.user_id])).get(item.user_id, "👤")
             text = f"[{name}](tg://user?id={item.user_id}), {text}"
         await send_markdown(self._bot, item.chat_id, text, thread_id=item.thread_id)
 
@@ -54,9 +56,9 @@ class ReminderDelivery:
             message_id=0,
             thread_id=item.thread_id,
             sender_id=item.user_id,
-            sender_name="планировщик",
+            sender_name="scheduler",
             date=self._clock(),
-            text=f"[Запланированное задание #{item.id} — выполни его сейчас и пришли результат]\n{item.text}",
+            text=f"[Scheduled task #{item.id}: do it now and send the result]\n{item.text}",
         )
         options = options_from(
             await self._chats.get_settings(item.user_id),
@@ -71,5 +73,6 @@ class ReminderDelivery:
             user_id=item.user_id,
             trigger=trigger,
             options=options,
+            lang=lang_of(await self._users.language(item.user_id)),
         )
         await self._turns.run(request, PlainSink(self._bot, item.chat_id, item.thread_id))
