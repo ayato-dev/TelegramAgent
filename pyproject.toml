@@ -1,7 +1,10 @@
 [project]
 name = "tgagent"
 version = "0.1.0"
-description = "Closed-access Telegram AI agent on Claude Haiku 5.5"
+description = "Private AI agent for Telegram on Claude, OpenAI, Gemini, DeepSeek or free Groq models"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "ayato-dev", email = "vi@ayato.dev" }
 ]
