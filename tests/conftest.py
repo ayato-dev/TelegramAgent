@@ -1,5 +1,6 @@
 import asyncio
 import os
+import shutil
 import tempfile
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
@@ -26,6 +27,20 @@ TABLES = (
     "chats",
     "users",
 )
+
+
+@pytest.fixture(autouse=True, scope="session")
+def shipped_prompts(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """Tests see the prompts the repository ships, not ones written into prompts/ locally."""
+    folder = tmp_path_factory.mktemp("prompts")
+    shutil.copy(ROOT / "prompts" / "fact-check.md", folder)
+    previous = os.environ.get("PROMPTS_DIR")
+    os.environ["PROMPTS_DIR"] = str(folder)
+    yield
+    if previous is None:
+        os.environ.pop("PROMPTS_DIR", None)
+    else:
+        os.environ["PROMPTS_DIR"] = previous
 
 
 async def _reset_postgres(url: str) -> None:
