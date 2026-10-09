@@ -12,7 +12,7 @@ PRIVATE_COMMANDS = [
     BotCommand(command="help", description="Что я умею"),
 ]
 GROUP_COMMANDS = [
-    BotCommand(command="settings", description="Настройки агента в этом чате", is_ephemeral=True),
+    BotCommand(command="settings", description="Твои настройки агента", is_ephemeral=True),
     BotCommand(command="usage", description="Расходы этого чата", is_ephemeral=True),
     BotCommand(command="help", description="Что я умею", is_ephemeral=True),
 ]

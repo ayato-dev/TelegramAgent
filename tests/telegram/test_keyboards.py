@@ -45,9 +45,10 @@ def test_flags_show_state() -> None:
 
 
 def test_settings_text_mentions_scope_and_model() -> None:
-    assert "этого чата" in settings_text(AgentOptions(), HAIKU, group=True)
-    assert "этого чата" not in settings_text(AgentOptions(), HAIKU, group=False)
-    assert "Claude Haiku 5.5" in settings_text(AgentOptions(), HAIKU, group=False)
+    text = settings_text(AgentOptions(), HAIKU)
+
+    assert "в группах" in text
+    assert "Claude Haiku 5.5" in text
 
 
 def test_model_button_opens_the_picker_only_when_there_is_a_choice() -> None:

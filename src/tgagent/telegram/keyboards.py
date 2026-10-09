@@ -88,10 +88,9 @@ def settings_keyboard(options: AgentOptions, model: ModelSpec, *, pickable: bool
     )
 
 
-def settings_text(options: AgentOptions, model: ModelSpec, *, group: bool) -> str:
-    scope = " этого чата" if group else ""
+def settings_text(options: AgentOptions, model: ModelSpec) -> str:
     return (
-        f"⚙️ Настройки{scope}\n\n"
+        "⚙️ Твои настройки — действуют в личке, в группах и в гостевом режиме\n\n"
         f"Модель: {model.label} {model_badges(model)}\n"
         f"Глубина: {EFFORT_LABELS[options.effort]} — сколько модель размышляет перед ответом.\n"
         "Размышления: показывать ход мыслей (в стриме и свёрнутым блоком в ответе).\n"

@@ -75,13 +75,18 @@ async def on_settings(message: Message, deps: Deps) -> None:
     if not can_manage(message, deps):
         await reply_privately(message, NOT_ALLOWED)
         return
-    chat = message.chat
+    chat, user = message.chat, message.from_user
     await deps.chats.upsert(chat.id, chat.type, chat.title)
-    options = deps.options(await deps.chats.get_settings(chat.id))
+    if user is None:
+        return
+    # Settings belong to the person and follow them into groups and guest mode; the row of their
+    # private chat with the bot (chat id = user id) keeps them.
+    await deps.chats.upsert(user.id, "private", None)
+    options = deps.options(await deps.chats.get_settings(user.id))
     model = deps.model(options)
     await reply_privately(
         message,
-        settings_text(options, model, group=chat.type in GROUP_TYPES),
+        settings_text(options, model),
         markup=settings_keyboard(options, model, pickable=len(deps.models) > 1),
     )
 
@@ -102,17 +107,17 @@ async def on_settings_button(query: CallbackQuery, bot: Bot, deps: Deps) -> None
     if not isinstance(message, Message):
         await query.answer("Сообщение с настройками устарело, вызовите /settings ещё раз.")
         return
-    chat_id = message.chat.id
+    chat_id, owner = message.chat.id, query.from_user.id
     action = (query.data or "").removeprefix(SETTINGS_PREFIX)
-    options = deps.options(await deps.chats.get_settings(chat_id))
+    options = deps.options(await deps.chats.get_settings(owner))
     patch = toggle(options, action, deps.model_keys)
     if patch:
-        options = deps.options(await deps.chats.update_settings(chat_id, patch))
+        options = deps.options(await deps.chats.update_settings(owner, patch))
     model = deps.model(options)
     if action == "models":
         text, markup = models_text(model), models_keyboard(deps.models, model.key)
     else:
-        text = settings_text(options, model, group=message.chat.type in GROUP_TYPES)
+        text = settings_text(options, model)
         markup = settings_keyboard(options, model, pickable=len(deps.models) > 1)
     try:
         if message.ephemeral_message_id:

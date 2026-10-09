@@ -98,11 +98,11 @@ class FakeUsers:
         return {1: "Аня"}
 
 
-def delivery(bot: FakeBot, turns: FakeTurns) -> ReminderDelivery:
+def delivery(bot: FakeBot, turns: FakeTurns, chats: FakeChats | None = None) -> ReminderDelivery:
     return ReminderDelivery(
         bot.as_bot(),
         cast(TurnService, turns),
-        cast(ChatRepo, FakeChats()),
+        cast(ChatRepo, chats or FakeChats()),
         cast(UserRepo, FakeUsers()),
         default_effort="medium",
         clock=lambda: NOW,
@@ -148,3 +148,61 @@ def test_only_allowed_users_manage_bot_in_groups() -> None:
     assert can_manage(group_command(OWNER), managed)
     assert not can_manage(group_command(STRANGER), managed)
     assert can_manage(private, managed)
+
+
+async def test_group_task_reminder_uses_its_authors_settings() -> None:
+    bot, turns, chats = FakeBot(), FakeTurns(), FakeChats()
+    chats.settings = {1: {"style": "troll"}, -50: {"style": "normal"}}
+
+    await delivery(bot, turns, chats)(ReminderRecord(3, -50, None, 1, NOW, "проверь курс", "task", "running"))
+
+    request, _ = turns.requests[0]
+    assert request.options.style == "troll"
+
+
+async def test_group_answers_use_the_settings_of_who_asked() -> None:
+    from aiogram.types import Message, MessageEntity
+
+    from tgagent.services.generation import KeyedLocks
+    from tgagent.services.settings import options_from
+    from tgagent.telegram.bursts import BurstCollector
+    from tgagent.telegram.handlers.groups import on_group_message
+
+    chats, turns = FakeChats(), FakeTurns()
+    chats.settings = {1: {"style": "troll"}, -50: {"style": "normal"}}
+
+    class Log:
+        async def add(self, message: Any) -> None:
+            return None
+
+    class Users:
+        async def upsert(self, *args: Any) -> None:
+            return None
+
+    group_deps = cast(
+        Deps,
+        SimpleNamespace(
+            chats=chats,
+            chat_log=Log(),
+            users=Users(),
+            turns=turns,
+            me=ME,
+            username=ME.username,
+            bursts=BurstCollector(quiet=0.01),
+            locks=KeyedLocks(),
+            options=lambda saved: options_from(saved, default_effort="medium"),
+        ),
+    )
+    mention = Message(
+        message_id=5,
+        date=NOW,
+        chat=GROUP,
+        from_user=OWNER,
+        text="@agent_bot как дела?",
+        entities=[MessageEntity(type="mention", offset=0, length=10)],
+    )
+
+    await on_group_message(mention, FakeBot().as_bot(), group_deps)
+
+    request, _ = turns.requests[0]
+    assert request.options.style == "troll"

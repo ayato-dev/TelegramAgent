@@ -59,7 +59,7 @@ class ReminderDelivery:
             text=f"[Запланированное задание #{item.id} — выполни его сейчас и пришли результат]\n{item.text}",
         )
         options = options_from(
-            await self._chats.get_settings(item.chat_id),
+            await self._chats.get_settings(item.user_id),
             default_effort=self._default_effort,
             models=self._models,
         )
