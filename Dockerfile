@@ -21,7 +21,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM python:3.13-slim-trixie
 RUN groupadd --system --gid 999 app \
- && useradd --system --gid 999 --uid 999 --create-home app
+ && useradd --system --gid 999 --uid 999 --create-home app \
+ && install -d -o app -g app /app/data
 WORKDIR /app
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --chown=app:app alembic.ini ./
@@ -29,6 +30,8 @@ COPY --chown=app:app migrations ./migrations
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
 USER app
+# The SQLite database (the default) lives here: mount a volume on /app/data. Webhook mode listens on 8080.
+EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD ["python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/tgagent-heartbeat') > 120)"]

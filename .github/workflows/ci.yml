@@ -28,8 +28,11 @@ jobs:
       - run: uv run mypy
 
   test:
-    name: Tests
+    name: Tests (${{ matrix.database }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        database: [postgres, sqlite]
     services:
       postgres:
         image: postgres:18
@@ -45,8 +48,9 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
-      TEST_DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
-      DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
+      # Empty on the SQLite run: the tests then use a throwaway SQLite file.
+      TEST_DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+asyncpg://test:test@localhost:5432/test' || '' }}
+      DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+asyncpg://test:test@localhost:5432/test' || 'sqlite+aiosqlite:///check/tgagent.db' }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -55,7 +59,9 @@ jobs:
       - run: uv sync --locked
       - run: uv run pytest
       - name: Migrations match the models
-        run: uv run alembic check
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
 
   build:
     name: Build image

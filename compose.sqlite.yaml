@@ -1,0 +1,25 @@
+# One container, no database server: the bot keeps its data in a SQLite file on a volume.
+# docker compose -f compose.sqlite.yaml up -d
+name: tgagent
+
+services:
+  bot:
+    image: ${BOT_IMAGE:-ghcr.io/ayato-dev/telegramagent:latest}
+    build: .
+    env_file:
+      - path: ${ENV_FILE:-.env}
+    volumes:
+      - botdata:/app/data
+    # Used only in webhook mode (WEBHOOK_URL): put HTTPS in front of this port.
+    ports:
+      - "${PORT:-8080}:8080"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  botdata:
