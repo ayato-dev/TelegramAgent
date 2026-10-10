@@ -22,6 +22,7 @@ from tgagent.storage.repos import (
     ConversationRecord,
     ConversationRepo,
     MemoryRepo,
+    NodeRecord,
     UsageRecord,
     UsageRepo,
 )
@@ -56,6 +57,18 @@ def error_text(error: ProviderError, lang: Lang = DEFAULT_LANG) -> str:
         )
         return t(lang, "error.rate_limited", wait=wait)
     return t(lang, f"error.{error.kind}")
+
+
+def last_memory(path: Sequence[NodeRecord]) -> str:
+    """The latest <memory> block the conversation was shown; empty when it never saw one."""
+    for node in reversed(path):
+        if node.role != "user":
+            continue
+        text = plain_text(node.content)
+        start = text.rfind("<memory>")
+        if start != -1:
+            return text[start : text.find("</memory>", start) + len("</memory>")]
+    return ""
 
 
 type TitleCallback = Callable[[ConversationRecord, str, str], Coroutine[None, None, None]]
@@ -114,7 +127,9 @@ class TurnService:
         chosen = request.options.model
         model = chosen if chosen and self._runners.supports(chosen) else self._runners.default_model
         reply_to = request.trigger.reply_to_message_id
-        if reply_to is not None:
+        # In groups a reply never leaves the chat's shared conversation; the replied-to message
+        # comes along as <context> instead.
+        if reply_to is not None and request.kind != "group":
             node = await self._conversations.node_for_message(request.chat_id, reply_to)
             conversation = await self._conversations.get(node.conversation_id) if node else None
             if node is not None and conversation and self._runners.supports(conversation.model):
@@ -193,17 +208,30 @@ class TurnService:
             conversation.id, parent_id, "user", [{"type": "compaction", "content": summary.strip()}]
         )
 
-    async def _environment(self, request: TurnRequest) -> str:
-        """The chat's description and, outside guest mode, its memory: shown when a conversation starts."""
+    def _environment(self, request: TurnRequest) -> str:
         attrs = [f'chat="{KIND_LABELS[request.kind]}"']
         if request.chat_title:
             attrs.append(f'title="{escape(request.chat_title)}"')
         attrs.append(f'timezone="{self._tz.key}"')
-        lines = [f"<environment {' '.join(attrs)}/>"]
+        return f"<environment {' '.join(attrs)}/>"
+
+    async def _memory(self, request: TurnRequest) -> str:
+        """The chat's memory as a <memory> block; empty in guest mode and while nothing is saved."""
         notes = await self._memories.list(request.chat_id) if request.kind != "guest" else []
-        if notes:
-            lines += ["<memory>", *(f"#{note.id} {note.text}" for note in notes), "</memory>"]
-        return "\n".join(lines)
+        if not notes:
+            return ""
+        return "\n".join(["<memory>", *(f"#{note.id} {note.text}" for note in notes), "</memory>"])
+
+    async def _preamble(self, request: TurnRequest, parent_id: int | None, fresh: bool) -> str | None:
+        """What opens the user turn: the environment and memory when the conversation starts (or was
+        just summarised), later only the memory, and only when it changed since the model last saw it."""
+        memory = await self._memory(request)
+        if fresh:
+            return "\n".join(part for part in (self._environment(request), memory) if part)
+        assert parent_id is not None
+        if memory == last_memory(await self._conversations.path(parent_id)):
+            return None
+        return memory or "<memory>\n</memory>"
 
     async def run(self, request: TurnRequest, sink: ResponseSink) -> None:
         started = time.monotonic()
@@ -218,7 +246,9 @@ class TurnService:
                 request.trigger,
                 context=() if from_reply else request.reply_context,
                 album=request.album,
-                environment=await self._environment(request) if parent_id is None or compacted else None,
+                environment=await self._preamble(
+                    request, parent_id, fresh=parent_id is None or bool(compacted)
+                ),
             )
             content = await runner.encode_user(
                 turn, include_author=request.include_author, code_enabled=request.options.code
@@ -323,7 +353,8 @@ class TurnService:
                     message_id=message_ids[0],
                     thread_id=request.thread_id,
                     sender_id=None,
-                    sender_name=self._bot_name,
+                    # Marks the bot's own words when they come back as <context> or chat history.
+                    sender_name=f"{self._bot_name} (you)",
                     date=datetime.now(UTC),
                     text=plain_text,
                     reply_to_message_id=request.trigger.message_id,

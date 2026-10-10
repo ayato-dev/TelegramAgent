@@ -42,7 +42,7 @@ Then configure the bot in @BotFather → Bot Settings:
 - **Groups.** The bot reads the chat and answers only when mentioned or replied to. A mention in reply to
   another message, photo or voice note includes that message and its reply chain in the context. A group
   (or each forum topic) shares one conversation with the bot that continues from one mention to the next;
-  `/new` starts it over. Replying to an older bot message continues from that point. The bot can summarise
+  `/new` starts it over. A reply to an older bot message brings that message into the conversation. The bot can summarise
   the recent discussion. While it works, the chat shows the typing status; the answer is posted as one
   message.
 - **Memory.** Each chat has its own memory: the bot saves what people ask it to remember (nicknames,

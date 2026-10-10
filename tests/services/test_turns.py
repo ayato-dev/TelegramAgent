@@ -201,7 +201,7 @@ async def test_second_private_message_continues_from_head(sessions: SessionFacto
     assert "<environment" not in second[2]["content"][0]["text"]
 
 
-async def test_group_reply_to_bot_continues_its_branch(sessions: SessionFactory) -> None:
+async def test_group_reply_to_bot_continues_the_shared_conversation(sessions: SessionFactory) -> None:
     runner = ScriptedRunner([result(("assistant", [TEXT])), result(("assistant", [TEXT]))])
     turns = service(sessions, runner)
     group = TurnRequest(
@@ -577,3 +577,50 @@ async def test_a_new_conversation_sees_only_its_chats_memory(sessions: SessionFa
     assert f"<memory>\n#{note.id} Виталю называть Сладеньким\n</memory>" in first
     assert "кофе" not in first
     assert "<memory>" not in runner.received[1][2]["content"][0]["text"]
+
+
+async def test_a_reply_to_an_older_bot_answer_keeps_the_groups_conversation(sessions: SessionFactory) -> None:
+    runner = ScriptedRunner([result(("assistant", [TEXT])) for _ in range(3)])
+    turns = service(sessions, runner)
+    await turns.run(group(1, "@bot первый вопрос"), RecordingSink())
+    await turns.run(group(2, "@bot второй вопрос"), RecordingSink())
+
+    older_answer = (await ChatLogRepo(sessions).recent(-100, None, 10))[0]
+    reply = replace(
+        group(3, "а почему так?", user_id=2),
+        trigger=message(3, "а почему так?", chat_id=-100, reply_to=older_answer.message_id),
+        reply_context=(older_answer,),
+    )
+    await turns.run(reply, RecordingSink())
+
+    third = runner.received[2]
+    assert [m["role"] for m in third] == ["user", "assistant", "user", "assistant", "user"]
+    assert "(you)" in third[-1]["content"][0]["text"]
+
+
+async def test_the_bots_answers_in_a_group_log_are_marked_as_its_own(sessions: SessionFactory) -> None:
+    runner = ScriptedRunner([result(("assistant", [TEXT]))])
+
+    await service(sessions, runner).run(group(1, "@bot привет"), RecordingSink())
+
+    logged = await ChatLogRepo(sessions).recent(-100, None, 10)
+    assert [(m.sender_name, m.from_bot) for m in logged] == [("bot (you)", True)]
+
+
+async def test_memory_that_changed_mid_conversation_is_shown_again(sessions: SessionFactory) -> None:
+    memories = MemoryRepo(sessions)
+    runner = ScriptedRunner([result(("assistant", [TEXT])) for _ in range(4)])
+    turns = service(sessions, runner)
+    await turns.run(group(1, "@bot привет"), RecordingSink())
+
+    note = await memories.add(-100, 1, "Олег — дед")
+    await turns.run(group(2, "@bot как зовут Олега?"), RecordingSink())
+    await turns.run(group(3, "@bot а ещё?"), RecordingSink())
+    await memories.clear(-100)
+    await turns.run(group(4, "@bot что помнишь?"), RecordingSink())
+
+    texts = [received[-1]["content"][0]["text"] for received in runner.received]
+    assert "<memory>" not in texts[0]
+    assert f"#{note.id} Олег — дед" in texts[1]
+    assert "<memory>" not in texts[2]
+    assert texts[3].startswith("<memory>\n</memory>")

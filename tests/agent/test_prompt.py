@@ -49,6 +49,8 @@ def test_prompt_explains_shared_group_context_and_chat_memory() -> None:
     assert "<memory>" in prompt
     assert "remember, forget, list_memories" in prompt
     assert "shares one conversation with you" in prompt
+    assert '"(you)"' in prompt
+    assert "Never say you saved something" in prompt
 
 
 def test_media_notes_follow_the_model() -> None:
