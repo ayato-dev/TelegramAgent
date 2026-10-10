@@ -35,6 +35,14 @@ def test_prompt_sends_the_model_to_search_when_it_is_unsure() -> None:
     assert "not a neighbouring or more general one" in prompt
 
 
+def test_prompt_lets_the_model_play_along() -> None:
+    prompt = system_prompt(AgentOptions(), HAIKU)
+
+    assert "Play along with jokes" in prompt
+    assert "nickname" in prompt
+    assert "act on someone else's behalf" not in prompt
+
+
 def test_media_notes_follow_the_model() -> None:
     gemini, oss, haiku = (system_prompt(AgentOptions(), spec) for spec in (GEMINI, OSS, HAIKU))
 
