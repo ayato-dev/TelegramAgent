@@ -20,7 +20,7 @@ from tgagent.i18n import t
 from tgagent.services.turns import TurnRequest, TurnService
 from tgagent.storage.db import SessionFactory
 from tgagent.storage.models import UsageEvent
-from tgagent.storage.repos import ChatLogRepo, Content, ConversationRepo, NodeRecord, UsageRepo
+from tgagent.storage.repos import ChatLogRepo, Content, ConversationRepo, MemoryRepo, NodeRecord, UsageRepo
 
 pytestmark = pytest.mark.db
 
@@ -148,6 +148,7 @@ def service(sessions: SessionFactory, *runners: ScriptedRunner) -> TurnService:
         ConversationRepo(sessions),
         UsageRepo(sessions),
         ChatLogRepo(sessions),
+        MemoryRepo(sessions),
         tz=ZoneInfo("UTC"),
     )
 
@@ -224,6 +225,54 @@ async def test_group_reply_to_bot_continues_its_branch(sessions: SessionFactory)
     await turns.run(follow_up, RecordingSink())
 
     assert [m["role"] for m in runner.received[1]] == ["user", "assistant", "user"]
+
+
+def group(
+    message_id: int, text: str, *, user_id: int = 1, thread_id: int | None = None, model: str | None = None
+) -> TurnRequest:
+    return TurnRequest(
+        kind="group",
+        chat_id=-100,
+        thread_id=thread_id,
+        chat_title="Team",
+        user_id=user_id,
+        trigger=message(message_id, text, chat_id=-100),
+        options=AgentOptions(model=model),
+    )
+
+
+async def test_mentions_in_a_group_continue_one_shared_conversation(sessions: SessionFactory) -> None:
+    runner = ScriptedRunner([result(("assistant", [TEXT])), result(("assistant", [TEXT]))])
+    turns = service(sessions, runner)
+
+    await turns.run(group(1, "@bot называй Виталю Сладеньким"), RecordingSink())
+    await turns.run(group(2, "@bot как меня зовут?", user_id=2), RecordingSink())
+
+    second = runner.received[1]
+    assert [m["role"] for m in second] == ["user", "assistant", "user"]
+    assert "Сладеньким" in second[0]["content"][0]["text"]
+    assert "<environment" not in second[2]["content"][0]["text"]
+
+
+async def test_a_group_conversation_stays_with_its_model(sessions: SessionFactory) -> None:
+    haiku = ScriptedRunner([result(("assistant", [TEXT])), result(("assistant", [TEXT]))])
+    oss = ScriptedRunner([], spec=OSS)
+    turns = service(sessions, haiku, oss)
+
+    await turns.run(group(1, "@bot привет"), RecordingSink())
+    await turns.run(group(2, "@bot и тебе", user_id=2, model=OSS.key), RecordingSink())
+
+    assert len(haiku.received) == 2 and oss.received == []
+
+
+async def test_each_group_topic_has_its_own_conversation(sessions: SessionFactory) -> None:
+    runner = ScriptedRunner([result(("assistant", [TEXT])), result(("assistant", [TEXT]))])
+    turns = service(sessions, runner)
+
+    await turns.run(group(1, "@bot тема один", thread_id=10), RecordingSink())
+    await turns.run(group(2, "@bot тема два", thread_id=20), RecordingSink())
+
+    assert [m["role"] for m in runner.received[1]] == ["user"]
 
 
 async def test_unmapped_reply_starts_new_conversation_with_context(sessions: SessionFactory) -> None:
@@ -512,3 +561,19 @@ async def test_failure_while_preparing_the_turn_is_reported(sessions: SessionFac
 
     assert sink.started
     assert sink.failed == [t("ru", "failure")]
+
+
+async def test_a_new_conversation_sees_only_its_chats_memory(sessions: SessionFactory) -> None:
+    memories = MemoryRepo(sessions)
+    note = await memories.add(-100, 2, "Виталю называть Сладеньким")
+    await memories.add(7, 1, "Аня пьёт кофе без сахара")
+    runner = ScriptedRunner([result(("assistant", [TEXT])), result(("assistant", [TEXT]))])
+    turns = service(sessions, runner)
+
+    await turns.run(group(1, "@bot привет"), RecordingSink())
+    await turns.run(group(2, "@bot как дела?"), RecordingSink())
+
+    first = runner.received[0][0]["content"][0]["text"]
+    assert f"<memory>\n#{note.id} Виталю называть Сладеньким\n</memory>" in first
+    assert "кофе" not in first
+    assert "<memory>" not in runner.received[1][2]["content"][0]["text"]

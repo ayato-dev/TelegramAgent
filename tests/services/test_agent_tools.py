@@ -10,7 +10,7 @@ from tgagent.context.media import MediaService
 from tgagent.domain import MediaRef, NormalizedMessage
 from tgagent.services.agent_tools import AgentTools
 from tgagent.services.reminders import ReminderScheduler
-from tgagent.storage.repos import ChatLogRepo, ReminderRecord, ReminderRepo
+from tgagent.storage.repos import ChatLogRepo, MemoryRecord, MemoryRepo, ReminderRecord, ReminderRepo
 
 NOW = datetime(2026, 10, 8, 9, 0, tzinfo=UTC)
 MSK = ZoneInfo("Europe/Moscow")
@@ -56,6 +56,24 @@ class FakeLog:
         return self.messages[-limit:]
 
 
+class FakeMemory:
+    def __init__(self) -> None:
+        self.notes: list[MemoryRecord] = []
+
+    async def add(self, chat_id: int, author_id: int | None, text: str) -> MemoryRecord:
+        record = MemoryRecord(len(self.notes) + 1, chat_id, author_id, text, NOW)
+        self.notes.append(record)
+        return record
+
+    async def list(self, chat_id: int) -> list[MemoryRecord]:
+        return [n for n in self.notes if n.chat_id == chat_id]
+
+    async def delete(self, memory_id: int, *, chat_id: int) -> bool:
+        before = len(self.notes)
+        self.notes = [n for n in self.notes if not (n.id == memory_id and n.chat_id == chat_id)]
+        return len(self.notes) < before
+
+
 class FakeMedia:
     async def transcript(self, media: MediaRef, *, user_id: int | None, chat_id: int) -> str:
         return "голосом сказал"
@@ -67,12 +85,14 @@ class Harness:
         self.reminders = FakeReminders()
         self.scheduler = FakeScheduler()
         self.log = FakeLog(log_messages or [])
+        self.memory = FakeMemory()
         self.tools = AgentTools(
             self.bot.as_bot(),
             cast(ReminderRepo, self.reminders),
             cast(ReminderScheduler, self.scheduler),
             cast(ChatLogRepo, self.log),
             cast(MediaService, FakeMedia()),
+            cast(MemoryRepo, self.memory),
             tz=MSK,
             clock=lambda: NOW,
         )
@@ -186,3 +206,48 @@ async def test_checklist_task_reply_targets_task() -> None:
     assert not outcome.is_error
     reply = h.bot.last("send_rich_message")["reply_parameters"]
     assert (reply.message_id, reply.checklist_task_id) == (77, 3)
+
+
+async def test_remember_saves_a_note_for_this_chat_only() -> None:
+    h = Harness()
+
+    outcome = await h.call("remember", {"text": "Виталю называть Сладеньким"}, kind="group")
+
+    assert not outcome.is_error and "#1" in outcome.content
+    assert [(n.chat_id, n.author_id, n.text) for n in h.memory.notes] == [
+        (-5, 1, "Виталю называть Сладеньким")
+    ]
+    assert "Сладеньким" in (await h.call("list_memories", {}, kind="group")).content
+    assert "пуста" in (await h.call("list_memories", {})).content
+
+
+async def test_remember_refuses_long_notes_and_a_full_memory() -> None:
+    h = Harness()
+    assert (await h.call("remember", {"text": "x" * 501})).is_error
+
+    for number in range(50):
+        await h.call("remember", {"text": f"заметка {number}"})
+
+    assert (await h.call("remember", {"text": "ещё одна"})).is_error
+
+
+async def test_forget_works_only_in_the_chat_that_saved_the_note() -> None:
+    h = Harness()
+    await h.call("remember", {"text": "секрет группы"}, kind="group")
+
+    assert (await h.call("forget", {"memory_id": 1})).is_error
+    assert not (await h.call("forget", {"memory_id": 1}, kind="group")).is_error
+    assert h.memory.notes == []
+
+
+async def test_memory_is_off_in_guest_mode() -> None:
+    h = Harness()
+
+    assert (await h.call("remember", {"text": "что-то"}, kind="guest")).is_error
+    assert h.memory.notes == []
+
+
+def test_memory_tools_are_offered_to_the_model() -> None:
+    names = [spec["name"] for spec in Harness().tools.registry().specs]
+
+    assert {"remember", "forget", "list_memories"} <= set(names)

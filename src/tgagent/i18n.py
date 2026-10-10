@@ -132,21 +132,27 @@ TEXTS: dict[str, dict[Lang, str]] = {
         "• искать в интернете и читать ссылки;\n"
         "• понимать фото, PDF и документы, расшифровывать голосовые и кружочки;\n"
         "• ставить напоминания и отложенные задания («через час проверь курс и напиши»);\n"
-        "• выполнять задачи из чек-листов Telegram.\n\n"
+        "• выполнять задачи из чек-листов Telegram;\n"
+        "• запоминать то, что попросите («запомни…», «называй меня…»): у каждого чата своя память.\n\n"
         "В личке каждый топик — отдельный разговор, /new начинает новый. Ответ на моё старое сообщение "
         "продолжает разговор с того места. Во время ответа можно нажать «Стоп».\n"
-        "В группе упомяните меня или ответьте на моё сообщение.\n\n"
-        "/settings — модель, глубина размышлений и инструменты, /usage — расходы.",
+        "В группе упомяните меня или ответьте на моё сообщение. Разговор со мной в группе общий и "
+        "продолжается от упоминания к упоминанию, /new начинает его заново.\n\n"
+        "/memory — что я помню в этом чате, /settings — модель, глубина размышлений и инструменты, "
+        "/usage — расходы.",
         "en": "I'm an AI agent. I can:\n"
         "• answer, reason and calculate (a Python sandbox, charts and files);\n"
         "• search the web and read links;\n"
         "• understand photos, PDFs and documents, transcribe voice and video notes;\n"
         '• set reminders and scheduled tasks ("in an hour check the rate and message me");\n'
-        "• work through Telegram checklists.\n\n"
+        "• work through Telegram checklists;\n"
+        '• remember what you ask me to ("remember…", "call me…"): every chat has its own memory.\n\n'
         "In private chats every topic is a separate conversation, /new starts a new one. Replying to one of "
         "my older messages continues from there. Press Stop while I'm answering to stop me.\n"
-        "In groups, mention me or reply to my message.\n\n"
-        "/settings — model, depth of thinking and tools, /usage — spending.",
+        "In groups, mention me or reply to my message. A group shares one conversation with me that "
+        "continues from one mention to the next; /new starts it over.\n\n"
+        "/memory — what I remember in this chat, /settings — model, depth of thinking and tools, "
+        "/usage — spending.",
     },
     "not_allowed": {
         "ru": "Эта команда доступна только тем, кто управляет ботом.",
@@ -162,6 +168,8 @@ TEXTS: dict[str, dict[Lang, str]] = {
         "en": "🆕 New conversation started; the earlier context no longer counts.",
     },
     "command.new": {"ru": "Новый разговор", "en": "New conversation"},
+    "command.new_group": {"ru": "Начать разговор в чате заново", "en": "Start the chat's conversation over"},
+    "command.memory": {"ru": "Что я помню в этом чате", "en": "What I remember in this chat"},
     "command.settings": {
         "ru": "Модель, глубина размышлений и инструменты",
         "en": "Model, depth of thinking and tools",
@@ -203,6 +211,14 @@ TEXTS: dict[str, dict[Lang, str]] = {
     # Reminders and access
     "reminder": {"ru": "⏰ **Напоминание**", "en": "⏰ **Reminder**"},
     "access_denied": {"ru": "Доступ к боту закрыт.", "en": "This bot is private."},
+    # Memory
+    "memory.title": {"ru": "🧠 Память этого чата:", "en": "🧠 This chat's memory:"},
+    "memory.empty": {
+        "ru": "Память этого чата пуста. Попросите меня что-нибудь запомнить, например: «запомни, что…».",
+        "en": 'This chat\'s memory is empty. Ask me to remember something, e.g. "remember that…".',
+    },
+    "memory.clear": {"ru": "🗑 Очистить память", "en": "🗑 Clear memory"},
+    "memory.cleared": {"ru": "Память этого чата очищена.", "en": "This chat's memory is cleared."},
     # Secretary mode
     "secretary.connected": {
         "ru": "Секретарь подключён. Он отвечает от вашего имени в чатах, выбранных в настройках Telegram "

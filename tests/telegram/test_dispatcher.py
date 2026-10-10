@@ -35,6 +35,10 @@ def test_group_commands_are_ephemeral() -> None:
     assert all(command.is_ephemeral for lang in ("ru", "en") for command in group_commands(lang))
 
 
+def test_groups_get_new_and_memory_commands() -> None:
+    assert {"new", "memory"} <= {command.command for command in group_commands("en")}
+
+
 async def test_commands_are_registered_in_english_and_russian() -> None:
     from tests.telegram.fakes import FakeBot
 

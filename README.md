@@ -40,9 +40,14 @@ Then configure the bot in @BotFather → Bot Settings:
   `/new` starts a new conversation. Replying to an earlier bot message continues the conversation from
   that point. Answers are streamed as drafts with a Stop button and optional reasoning.
 - **Groups.** The bot reads the chat and answers only when mentioned or replied to. A mention in reply to
-  another message, photo or voice note includes that message and its reply chain in the context. Each
-  person replying to the bot continues their own branch. The bot can summarise the recent discussion.
-  While it works, the chat shows the typing status; the answer is posted as one message.
+  another message, photo or voice note includes that message and its reply chain in the context. A group
+  (or each forum topic) shares one conversation with the bot that continues from one mention to the next;
+  `/new` starts it over. Replying to an older bot message continues from that point. The bot can summarise
+  the recent discussion. While it works, the chat shows the typing status; the answer is posted as one
+  message.
+- **Memory.** Each chat has its own memory: the bot saves what people ask it to remember (nicknames,
+  preferences, agreements) and sees it in every later conversation of that chat. Nothing is shared between
+  chats. `/memory` shows the chat's notes and clears them.
 - **Guest mode.** The bot can be called in any chat, including chats it is not a member of, and answers
   once.
 - **Secretary mode.** Connected to your account through Telegram Business, the bot answers people in your

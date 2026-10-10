@@ -11,7 +11,7 @@ from tgagent.services.secretary import SecretaryService
 from tgagent.services.settings import options_from
 from tgagent.services.turns import TurnService
 from tgagent.services.usage_report import UsageReport
-from tgagent.storage.repos import ChatLogRepo, ChatRepo, ConversationRepo, UserRepo
+from tgagent.storage.repos import ChatLogRepo, ChatRepo, ConversationRepo, MemoryRepo, UserRepo
 from tgagent.telegram.access import AccessPolicy
 from tgagent.telegram.bursts import BurstCollector
 
@@ -28,6 +28,7 @@ class Deps:
     users: UserRepo
     chat_log: ChatLogRepo
     conversations: ConversationRepo
+    memories: MemoryRepo
     usage_report: UsageReport
     locks: KeyedLocks
     generations: GenerationRegistry

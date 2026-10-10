@@ -12,7 +12,9 @@ from tgagent.telegram.access import GROUP_TYPES
 from tgagent.telegram.deps import Deps
 from tgagent.telegram.handlers.common import remember_user, reply_privately
 from tgagent.telegram.keyboards import (
+    MEMORY_CLEAR,
     SETTINGS_PREFIX,
+    memory_keyboard,
     models_keyboard,
     models_text,
     settings_keyboard,
@@ -21,6 +23,8 @@ from tgagent.telegram.keyboards import (
 
 log = logging.getLogger(__name__)
 router = Router(name="commands")
+
+MESSAGE_LIMIT = 4_000
 
 
 def language(message: Message) -> Lang:
@@ -58,6 +62,18 @@ async def on_new(message: Message, bot: Bot, deps: Deps) -> None:
     await message.answer(t(lang, "new.started"))
 
 
+@router.message(Command("new"), F.chat.type.in_(GROUP_TYPES))
+async def on_new_in_group(message: Message, bot: Bot, deps: Deps) -> None:
+    """The chat (or forum topic) shares one conversation with the bot; this starts it over."""
+    lang = language(message)
+    if not can_manage(message, deps):
+        await reply_privately(message, t(lang, "not_allowed"))
+        return
+    thread_id = message.message_thread_id if message.is_topic_message else None
+    await deps.conversations.deactivate(message.chat.id, thread_id)
+    await bot.send_message(chat_id=message.chat.id, text=t(lang, "new.started"), message_thread_id=thread_id)
+
+
 @router.message(Command("settings"))
 async def on_settings(message: Message, deps: Deps) -> None:
     lang = language(message)
@@ -89,6 +105,43 @@ async def on_usage(message: Message, deps: Deps) -> None:
     chat_id = message.chat.id if message.chat.type in GROUP_TYPES else None
     report = await deps.usage_report.render(chat_id=chat_id, now=datetime.now(UTC), lang=lang)
     await reply_privately(message, report, markdown=True)
+
+
+@router.message(Command("memory"))
+async def on_memory(message: Message, deps: Deps) -> None:
+    """This chat's memory: what the agent saved here at someone's request."""
+    lang = language(message)
+    if not can_manage(message, deps):
+        await reply_privately(message, t(lang, "not_allowed"))
+        return
+    notes = await deps.memories.list(message.chat.id)
+    if not notes:
+        await reply_privately(message, t(lang, "memory.empty"))
+        return
+    text = "\n".join([t(lang, "memory.title"), *(f"#{note.id} {note.text}" for note in notes)])
+    await reply_privately(message, text[:MESSAGE_LIMIT], markup=memory_keyboard(lang))
+
+
+@router.callback_query(F.data == MEMORY_CLEAR)
+async def on_memory_clear(query: CallbackQuery, bot: Bot, deps: Deps) -> None:
+    """Only people on the whitelist get past the access middleware to press this."""
+    message = query.message
+    if isinstance(message, Message):
+        await deps.memories.clear(message.chat.id)
+        text = t(lang_of(query.from_user.language_code), "memory.cleared")
+        try:
+            if message.ephemeral_message_id:
+                await bot.edit_ephemeral_message_text(
+                    chat_id=message.chat.id,
+                    receiver_user_id=query.from_user.id,
+                    ephemeral_message_id=message.ephemeral_message_id,
+                    text=text,
+                )
+            else:
+                await bot.edit_message_text(chat_id=message.chat.id, message_id=message.message_id, text=text)
+        except TelegramBadRequest as exc:
+            log.warning("could not update memory message: %s", exc.message)
+    await bot.answer_callback_query(callback_query_id=query.id)
 
 
 @router.callback_query(F.data.startswith(SETTINGS_PREFIX))

@@ -38,6 +38,7 @@ from tgagent.storage.repos import (
     ChatRepo,
     ConversationRepo,
     MediaRepo,
+    MemoryRepo,
     ReminderRecord,
     ReminderRepo,
     SecretaryLogRepo,
@@ -189,7 +190,7 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
     sessions = create_sessionmaker(engine)
     users, chats, chat_log = UserRepo(sessions), ChatRepo(sessions), ChatLogRepo(sessions)
     conversations, usage, reminders = ConversationRepo(sessions), UsageRepo(sessions), ReminderRepo(sessions)
-    secretary_log = SecretaryLogRepo(sessions)
+    secretary_log, memories = SecretaryLogRepo(sessions), MemoryRepo(sessions)
 
     bot = Bot(token=settings.telegram_bot_token.get_secret_value())
     stack.push_async_callback(bot.session.close)
@@ -227,7 +228,9 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
         await delivery(item)
 
     scheduler = ReminderScheduler(reminders, fire, poll_interval=settings.reminder_poll_seconds)
-    tool_registry = AgentTools(bot, reminders, scheduler, chat_log, media, tz=settings.tz).registry()
+    tool_registry = AgentTools(
+        bot, reminders, scheduler, chat_log, media, memories, tz=settings.tz
+    ).registry()
     runners = build_runners(settings, stack, anthropic, media, media_cache, tool_registry)
     log.info("models: %s (default %s)", ", ".join(spec.key for spec in runners.models), runners.default_model)
     turns = TurnService(
@@ -235,6 +238,7 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
         conversations,
         usage,
         chat_log,
+        memories,
         tz=settings.tz,
         bot_name=me.first_name,
         on_title=TopicTitler(runners, bot, conversations, usage),
@@ -273,6 +277,7 @@ async def serve(settings: Settings, stack: AsyncExitStack) -> None:
         users=users,
         chat_log=chat_log,
         conversations=conversations,
+        memories=memories,
         usage_report=UsageReport(usage, users, settings.tz),
         locks=KeyedLocks(),
         generations=GenerationRegistry(),

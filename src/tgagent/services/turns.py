@@ -21,6 +21,7 @@ from tgagent.storage.repos import (
     ConversationKind,
     ConversationRecord,
     ConversationRepo,
+    MemoryRepo,
     UsageRecord,
     UsageRepo,
 )
@@ -88,6 +89,7 @@ class TurnService:
         conversations: ConversationRepo,
         usage: UsageRepo,
         chat_log: ChatLogRepo,
+        memories: MemoryRepo,
         *,
         tz: ZoneInfo,
         bot_name: str = "bot",
@@ -97,6 +99,7 @@ class TurnService:
         self._conversations = conversations
         self._usage = usage
         self._chat_log = chat_log
+        self._memories = memories
         self._tz = tz
         self._bot_name = bot_name
         self._on_title = on_title
@@ -105,8 +108,8 @@ class TurnService:
     async def _resolve(self, request: TurnRequest) -> tuple[ConversationRecord, int | None, bool]:
         """Where the turn attaches: (conversation, parent node, whether a reply picked the branch).
 
-        A conversation stays with the model it was started with: replies continue in it, while
-        choosing another model starts a fresh private conversation.
+        A conversation stays with the model it was started with: replies and group mentions continue
+        in it, while choosing another model starts a fresh private conversation.
         """
         chosen = request.options.model
         model = chosen if chosen and self._runners.supports(chosen) else self._runners.default_model
@@ -133,6 +136,13 @@ class TurnService:
                 model=model,
             )
             return created, None, False
+        if request.kind == "group":
+            # The whole chat (or forum topic) shares one conversation, kept in the model it started with.
+            active = await self._conversations.active(request.chat_id, request.thread_id)
+            if active is not None and self._runners.supports(active.model):
+                return active, active.head_node_id, False
+            if active is not None:
+                await self._conversations.deactivate(request.chat_id, request.thread_id)
         created = await self._conversations.create(
             request.chat_id, request.thread_id, request.kind, model=model
         )
@@ -183,12 +193,17 @@ class TurnService:
             conversation.id, parent_id, "user", [{"type": "compaction", "content": summary.strip()}]
         )
 
-    def _environment(self, request: TurnRequest) -> str:
+    async def _environment(self, request: TurnRequest) -> str:
+        """The chat's description and, outside guest mode, its memory: shown when a conversation starts."""
         attrs = [f'chat="{KIND_LABELS[request.kind]}"']
         if request.chat_title:
             attrs.append(f'title="{escape(request.chat_title)}"')
         attrs.append(f'timezone="{self._tz.key}"')
-        return f"<environment {' '.join(attrs)}/>"
+        lines = [f"<environment {' '.join(attrs)}/>"]
+        notes = await self._memories.list(request.chat_id) if request.kind != "guest" else []
+        if notes:
+            lines += ["<memory>", *(f"#{note.id} {note.text}" for note in notes), "</memory>"]
+        return "\n".join(lines)
 
     async def run(self, request: TurnRequest, sink: ResponseSink) -> None:
         started = time.monotonic()
@@ -203,7 +218,7 @@ class TurnService:
                 request.trigger,
                 context=() if from_reply else request.reply_context,
                 album=request.album,
-                environment=self._environment(request) if parent_id is None or compacted else None,
+                environment=await self._environment(request) if parent_id is None or compacted else None,
             )
             content = await runner.encode_user(
                 turn, include_author=request.include_author, code_enabled=request.options.code
@@ -299,7 +314,7 @@ class TurnService:
             log.exception("could not deliver answer to chat %s", request.chat_id)
             message_ids = []
         await self._conversations.map_messages(request.chat_id, message_ids, node_id)
-        if request.kind in ("private", "reminder"):
+        if request.kind in ("private", "reminder", "group"):
             await self._conversations.set_head(conversation.id, node_id)
         if request.kind == "group" and message_ids:
             await self._chat_log.add(

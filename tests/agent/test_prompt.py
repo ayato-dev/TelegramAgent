@@ -43,6 +43,14 @@ def test_prompt_lets_the_model_play_along() -> None:
     assert "act on someone else's behalf" not in prompt
 
 
+def test_prompt_explains_shared_group_context_and_chat_memory() -> None:
+    prompt = system_prompt(AgentOptions(), HAIKU)
+
+    assert "<memory>" in prompt
+    assert "remember, forget, list_memories" in prompt
+    assert "shares one conversation with you" in prompt
+
+
 def test_media_notes_follow_the_model() -> None:
     gemini, oss, haiku = (system_prompt(AgentOptions(), spec) for spec in (GEMINI, OSS, HAIKU))
 

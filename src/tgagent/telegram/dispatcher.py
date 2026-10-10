@@ -10,6 +10,7 @@ from tgagent.telegram.handlers import business, commands, groups, guest, members
 def private_commands(lang: Lang) -> list[BotCommand]:
     return [
         BotCommand(command="new", description=t(lang, "command.new")),
+        BotCommand(command="memory", description=t(lang, "command.memory")),
         BotCommand(command="settings", description=t(lang, "command.settings")),
         BotCommand(command="usage", description=t(lang, "command.usage")),
         BotCommand(command="help", description=t(lang, "command.help")),
@@ -18,6 +19,8 @@ def private_commands(lang: Lang) -> list[BotCommand]:
 
 def group_commands(lang: Lang) -> list[BotCommand]:
     return [
+        BotCommand(command="new", description=t(lang, "command.new_group"), is_ephemeral=True),
+        BotCommand(command="memory", description=t(lang, "command.memory"), is_ephemeral=True),
         BotCommand(command="settings", description=t(lang, "command.settings_group"), is_ephemeral=True),
         BotCommand(command="usage", description=t(lang, "command.usage_group"), is_ephemeral=True),
         BotCommand(command="help", description=t(lang, "command.help"), is_ephemeral=True),

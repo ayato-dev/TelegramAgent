@@ -189,6 +189,18 @@ class MediaCache(Base):
     created_at: Mapped[datetime] = created_at()
 
 
+class Memory(Base):
+    """A note the agent keeps for one chat: nicknames, preferences, agreements."""
+
+    __tablename__ = "memories"
+
+    id: Mapped[int] = mapped_column(AutoId, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    author_id: Mapped[int | None] = mapped_column(BigInteger)
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = created_at()
+
+
 class Reminder(Base):
     __tablename__ = "reminders"
     __table_args__ = (Index(None, "status", "due_at"),)

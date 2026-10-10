@@ -8,6 +8,7 @@ from tgagent.agent.tools import AgentOptions
 from tgagent.i18n import DEFAULT_LANG, Lang, t
 
 SETTINGS_PREFIX = "set:"
+MEMORY_CLEAR = "mem:clear"
 EFFORTS = ("low", "medium", "high")
 BADGES = (("vision", "👁"), ("native_audio", "🎙"), ("web", "🌐"), ("code", "🐍"), ("image_out", "🎨"))
 
@@ -86,3 +87,8 @@ def settings_keyboard(
 def settings_text(options: AgentOptions, model: ModelSpec, lang: Lang = DEFAULT_LANG) -> str:
     label = f"{model.label} {model_badges(model)}".strip()
     return t(lang, "settings.text", model=label, effort=t(lang, f"effort.{options.effort}"))
+
+
+def memory_keyboard(lang: Lang = DEFAULT_LANG) -> InlineKeyboardMarkup:
+    button = InlineKeyboardButton(text=t(lang, "memory.clear"), callback_data=MEMORY_CLEAR, style="danger")
+    return InlineKeyboardMarkup(inline_keyboard=[[button]])

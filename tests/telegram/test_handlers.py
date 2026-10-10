@@ -5,6 +5,7 @@ from typing import Any, cast
 from aiogram.types import Chat, ChatMemberLeft, ChatMemberMember, ChatMemberUpdated, Message, User
 
 from tests.telegram.fakes import FakeBot
+from tgagent.i18n import t
 from tgagent.services.turns import TurnRequest, TurnService
 from tgagent.storage.repos import ChatRepo, ReminderRecord, UserRepo
 from tgagent.telegram.access import AccessPolicy
@@ -241,3 +242,104 @@ async def test_writing_to_the_bot_counts_as_being_online() -> None:
     await on_private_message(message, FakeBot().as_bot(), cast(Deps, private_deps))
 
     assert seen == [(OWNER.id, NOW)]
+
+
+class FakeConversations:
+    def __init__(self) -> None:
+        self.deactivated: list[tuple[int, int | None]] = []
+
+    async def deactivate(self, chat_id: int, thread_id: int | None) -> None:
+        self.deactivated.append((chat_id, thread_id))
+
+
+async def test_new_in_a_group_starts_the_chats_conversation_over() -> None:
+    from tgagent.telegram.handlers.commands import on_new_in_group
+
+    bot, conversations = FakeBot(), FakeConversations()
+    group_deps = cast(
+        Deps, SimpleNamespace(policy=AccessPolicy(frozenset({1}), {-50}), conversations=conversations)
+    )
+
+    await on_new_in_group(group_command(OWNER), bot.as_bot(), group_deps)
+
+    assert conversations.deactivated == [(-50, None)]
+    assert bot.last("send_message")["chat_id"] == -50
+
+
+async def test_only_allowed_users_reset_a_group_conversation() -> None:
+    from tgagent.telegram.handlers.commands import on_new_in_group
+
+    bot, conversations = FakeBot(), FakeConversations()
+    group_deps = cast(
+        Deps, SimpleNamespace(policy=AccessPolicy(frozenset({1}), {-50}), conversations=conversations)
+    )
+
+    await on_new_in_group(group_command(STRANGER).as_(bot.as_bot()), bot.as_bot(), group_deps)
+
+    assert conversations.deactivated == []
+
+
+class FakeMemories:
+    def __init__(self, notes: list[Any]) -> None:
+        self.notes = notes
+        self.cleared: list[int] = []
+
+    async def list(self, chat_id: int) -> list[Any]:
+        return [note for note in self.notes if note.chat_id == chat_id]
+
+    async def clear(self, chat_id: int) -> int:
+        self.cleared.append(chat_id)
+        before = len(self.notes)
+        self.notes = [note for note in self.notes if note.chat_id != chat_id]
+        return before - len(self.notes)
+
+
+def memory_deps(memories: FakeMemories) -> Deps:
+    return cast(Deps, SimpleNamespace(policy=AccessPolicy(frozenset({1}), {-50}), memories=memories))
+
+
+def private_command(text: str, bot: FakeBot) -> Message:
+    chat = Chat(id=1, type="private")
+    return Message(message_id=1, date=NOW, chat=chat, from_user=OWNER, text=text).as_(bot.as_bot())
+
+
+async def test_memory_command_lists_only_this_chats_notes() -> None:
+    from tgagent.storage.repos import MemoryRecord
+    from tgagent.telegram.handlers.commands import on_memory
+
+    bot = FakeBot()
+    memories = FakeMemories([MemoryRecord(3, 1, 1, "любит кофе", NOW), MemoryRecord(4, -50, 2, "чужое", NOW)])
+
+    await on_memory(private_command("/memory", bot), memory_deps(memories))
+
+    sent = bot.last("send_message")
+    assert "#3 любит кофе" in sent["text"] and "чужое" not in sent["text"]
+    assert sent["reply_markup"].inline_keyboard[0][0].callback_data == "mem:clear"
+
+
+async def test_an_empty_memory_has_nothing_to_clear() -> None:
+    from tgagent.telegram.handlers.commands import on_memory
+
+    bot = FakeBot()
+
+    await on_memory(private_command("/memory", bot), memory_deps(FakeMemories([])))
+
+    sent = bot.last("send_message")
+    assert sent["text"] == t("en", "memory.empty") and sent["reply_markup"] is None
+
+
+async def test_clearing_memory_empties_only_this_chat() -> None:
+    from aiogram.types import CallbackQuery
+
+    from tgagent.storage.repos import MemoryRecord
+    from tgagent.telegram.handlers.commands import on_memory_clear
+
+    bot = FakeBot()
+    memories = FakeMemories([MemoryRecord(3, 1, 1, "любит кофе", NOW), MemoryRecord(4, -50, 2, "чужое", NOW)])
+    shown = Message(message_id=7, date=NOW, chat=Chat(id=1, type="private"), text="память")
+    query = CallbackQuery(id="q", from_user=OWNER, chat_instance="c", data="mem:clear", message=shown)
+
+    await on_memory_clear(query, bot.as_bot(), memory_deps(memories))
+
+    assert memories.cleared == [1] and len(memories.notes) == 1
+    assert bot.last("edit_text")["text"] == t("en", "memory.cleared")

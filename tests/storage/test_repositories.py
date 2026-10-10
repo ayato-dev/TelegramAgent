@@ -13,6 +13,7 @@ from tgagent.storage.repos import (
     ConversationRepo,
     LoggedMessage,
     MediaRepo,
+    MemoryRepo,
     ReminderRepo,
     SecretaryLogRepo,
     UsageRecord,
@@ -366,3 +367,35 @@ async def test_secretary_log_purge_removes_old_messages(sessions: SessionFactory
 
     assert await repo.purge_older_than(NOW - timedelta(days=30)) == 1
     assert [m.message_id for m in await repo.recent("conn", 7, limit=10)] == [2]
+
+
+async def test_memory_belongs_to_one_chat(sessions: SessionFactory) -> None:
+    repo = MemoryRepo(sessions)
+    first = await repo.add(-100, 1, "Виталю называть Сладеньким")
+    await repo.add(-100, 2, "по пятницам созвон")
+    await repo.add(7, 1, "любит кофе")
+
+    notes = await repo.list(-100)
+
+    assert [n.text for n in notes] == ["Виталю называть Сладеньким", "по пятницам созвон"]
+    assert (notes[0].id, notes[0].author_id) == (first.id, 1)
+    assert [n.text for n in await repo.list(7)] == ["любит кофе"]
+
+
+async def test_memory_is_deleted_only_in_its_chat(sessions: SessionFactory) -> None:
+    repo = MemoryRepo(sessions)
+    note = await repo.add(-100, 1, "секрет")
+
+    assert not await repo.delete(note.id, chat_id=7)
+    assert await repo.delete(note.id, chat_id=-100)
+    assert await repo.list(-100) == []
+
+
+async def test_memory_of_a_chat_can_be_cleared(sessions: SessionFactory) -> None:
+    repo = MemoryRepo(sessions)
+    await repo.add(-100, 1, "раз")
+    await repo.add(-100, 1, "два")
+    await repo.add(7, 1, "остаётся")
+
+    assert await repo.clear(-100) == 2
+    assert await repo.list(-100) == [] and len(await repo.list(7)) == 1

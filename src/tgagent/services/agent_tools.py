@@ -1,4 +1,4 @@
-"""Client tools the agent can call: reminders, chat history, polls, checklist replies."""
+"""Client tools the agent can call: reminders, chat memory, chat history, polls, checklist replies."""
 
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -13,11 +13,13 @@ from tgagent.agent.tools import ToolContext, ToolOutcome, ToolRegistry
 from tgagent.context.formatting import media_label
 from tgagent.context.media import MediaService
 from tgagent.services.reminders import ReminderScheduler, utc_now
-from tgagent.storage.repos import ChatLogRepo, ReminderRepo
+from tgagent.storage.repos import ChatLogRepo, MemoryRepo, ReminderRepo
 
 HISTORY_LIMIT = 200
 MAX_TRANSCRIPTS = 10
 MAX_REMINDER_AHEAD = timedelta(days=366)
+MAX_MEMORIES = 50
+MAX_MEMORY_CHARS = 500
 
 
 def _kind(mode: str) -> str:
@@ -36,6 +38,7 @@ class AgentTools:
         scheduler: ReminderScheduler,
         chat_log: ChatLogRepo,
         media: MediaService,
+        memories: MemoryRepo,
         *,
         tz: ZoneInfo,
         clock: Callable[[], datetime] = utc_now,
@@ -45,6 +48,7 @@ class AgentTools:
         self._scheduler = scheduler
         self._chat_log = chat_log
         self._media = media
+        self._memories = memories
         self._tz = tz
         self._clock = clock
 
@@ -54,6 +58,9 @@ class AgentTools:
                 "set_reminder": self.set_reminder,
                 "list_reminders": self.list_reminders,
                 "cancel_reminder": self.cancel_reminder,
+                "remember": self.remember,
+                "forget": self.forget,
+                "list_memories": self.list_memories,
                 "read_chat_history": self.read_chat_history,
                 "create_poll": self.create_poll,
                 "reply_to_checklist_task": self.reply_to_checklist_task,
@@ -98,6 +105,28 @@ class AgentTools:
         if await self._reminders.cancel(int(args["reminder_id"]), chat_id=ctx.chat_id):
             return ToolOutcome(f"Напоминание #{args['reminder_id']} отменено.")
         return error("активного напоминания с таким id в этом чате нет")
+
+    async def remember(self, args: dict[str, Any], ctx: ToolContext) -> ToolOutcome:
+        if ctx.chat_kind == "guest":
+            return error("в гостевом режиме память недоступна")
+        text = str(args["text"]).strip()
+        if not text or len(text) > MAX_MEMORY_CHARS:
+            return error(f"заметка должна быть от 1 до {MAX_MEMORY_CHARS} символов")
+        if len(await self._memories.list(ctx.chat_id)) >= MAX_MEMORIES:
+            return error(f"в памяти чата уже {MAX_MEMORIES} заметок — удалите ненужные через forget")
+        note = await self._memories.add(ctx.chat_id, ctx.user_id, text)
+        return ToolOutcome(f"Запомнено в памяти этого чата: #{note.id}.")
+
+    async def forget(self, args: dict[str, Any], ctx: ToolContext) -> ToolOutcome:
+        if await self._memories.delete(int(args["memory_id"]), chat_id=ctx.chat_id):
+            return ToolOutcome(f"Заметка #{args['memory_id']} удалена.")
+        return error("заметки с таким номером в памяти этого чата нет")
+
+    async def list_memories(self, args: dict[str, Any], ctx: ToolContext) -> ToolOutcome:
+        notes = await self._memories.list(ctx.chat_id)
+        if not notes:
+            return ToolOutcome("Память этого чата пуста.")
+        return ToolOutcome("\n".join(f"#{note.id} {note.text}" for note in notes))
 
     async def read_chat_history(self, args: dict[str, Any], ctx: ToolContext) -> ToolOutcome:
         if ctx.chat_kind != "group":
