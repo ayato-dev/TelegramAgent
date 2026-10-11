@@ -388,7 +388,8 @@ pull request и push, собирает мультиархитектурный о
 - **Secrets:** `TELEGRAM_BOT_TOKEN`, `POSTGRES_PASSWORD` и ключи используемых провайдеров.
 - **Variables:** `DEPLOY_ENABLED=true` (без неё развёртывание пропускается), `ALLOWED_USER_IDS`.
   Необязательные: `DEFAULT_MODEL`, `GROQ_PAID_TIER`, `GEMINI_PAID_TIER`, `ACCESS_DENIED_TEXT`, `TIMEZONE`,
-  `DEFAULT_EFFORT`, `COMPACTION_TRIGGER_TOKENS`, `WHISPER_MODEL`, `DEPLOY_DIR` (по умолчанию `/opt/tgagent`).
+  `DEFAULT_EFFORT`, `COMPACTION_TRIGGER_TOKENS`, `WHISPER_MODEL`, `WEB_SEARCH_MAX_USES`, `DEPLOY_DIR`
+  (по умолчанию `/opt/tgagent`).
 
 ## Обслуживание
 

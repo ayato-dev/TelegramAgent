@@ -148,6 +148,7 @@ jobs:
           DEFAULT_EFFORT: ${{ vars.DEFAULT_EFFORT || 'medium' }}
           COMPACTION_TRIGGER_TOKENS: ${{ vars.COMPACTION_TRIGGER_TOKENS || '100000' }}
           WHISPER_MODEL: ${{ vars.WHISPER_MODEL || 'whisper-large-v3' }}
+          WEB_SEARCH_MAX_USES: ${{ vars.WEB_SEARCH_MAX_USES }}
           DEFAULT_MODEL: ${{ vars.DEFAULT_MODEL }}
           GROQ_PAID_TIER: ${{ vars.GROQ_PAID_TIER || 'false' }}
           GEMINI_PAID_TIER: ${{ vars.GEMINI_PAID_TIER || 'false' }}
@@ -157,7 +158,8 @@ jobs:
             for name in BOT_IMAGE TELEGRAM_BOT_TOKEN POSTGRES_PASSWORD \
                         ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY DEEPSEEK_API_KEY GROQ_API_KEY \
                         DEFAULT_MODEL GROQ_PAID_TIER GEMINI_PAID_TIER \
-                        ALLOWED_USER_IDS ACCESS_DENIED_TEXT TIMEZONE DEFAULT_EFFORT COMPACTION_TRIGGER_TOKENS WHISPER_MODEL; do
+                        ALLOWED_USER_IDS ACCESS_DENIED_TEXT TIMEZONE DEFAULT_EFFORT COMPACTION_TRIGGER_TOKENS WHISPER_MODEL \
+                        WEB_SEARCH_MAX_USES; do
               # Unset variables stay out of .env, so the bot's own defaults apply.
               if [ -n "${!name}" ]; then printf '%s=%s\n' "$name" "${!name}"; fi
             done

@@ -379,7 +379,7 @@ Repository settings:
 - **Secrets:** `TELEGRAM_BOT_TOKEN`, `POSTGRES_PASSWORD` and the provider keys in use.
 - **Variables:** `DEPLOY_ENABLED=true` (deployment is skipped otherwise), `ALLOWED_USER_IDS`. Optional:
   `DEFAULT_MODEL`, `GROQ_PAID_TIER`, `GEMINI_PAID_TIER`, `ACCESS_DENIED_TEXT`, `TIMEZONE`, `DEFAULT_EFFORT`,
-  `COMPACTION_TRIGGER_TOKENS`, `WHISPER_MODEL`, `DEPLOY_DIR` (default `/opt/tgagent`).
+  `COMPACTION_TRIGGER_TOKENS`, `WHISPER_MODEL`, `WEB_SEARCH_MAX_USES`, `DEPLOY_DIR` (default `/opt/tgagent`).
 
 ## Maintenance
 
